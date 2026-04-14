@@ -1,0 +1,9 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "./mvnw": true,
+        "netstat": true,
+        "mvn spring-boot:run": true,
+        "npm run build": true,
+        "awk": true
+    }
+}
