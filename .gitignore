@@ -1,0 +1,52 @@
+# ─── Node / Frontend ───────────────────────────────────────────────
+node_modules/
+dist/
+.vite/
+*.local
+
+# ─── Backend / Maven ───────────────────────────────────────────────
+backend/target/
+backend/.mvn/wrapper/maven-wrapper.jar
+!backend/**/src/main/**/target/
+!backend/**/src/test/**/target/
+
+# ─── IDE / Editores ────────────────────────────────────────────────
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+.classpath
+.project
+.settings/
+.factorypath
+.springBeans
+.sts4-cache
+
+# ─── OS ────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Logs ──────────────────────────────────────────────────────────
+*.log
+logs/
+
+# ─── Variables de entorno ──────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Archivos temporales / generados ───────────────────────────────
+*.class
+*.jar
+!backend/mvnw
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.rar

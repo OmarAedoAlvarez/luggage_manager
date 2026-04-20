@@ -19,4 +19,8 @@ public class AeropuertoDTO {
     private int capacidadAlmacen;
     private int ocupacionActual;
     private String semaforo;
+    private int maletasRecibidas;
+    private int maletasEnviadas;
+    private double ocupacionPromedio;
+    private double ocupacionMaxima;
 }

@@ -41,14 +41,23 @@ const getLog = (s) =>
   s?.logOperaciones || []
 
 function normalizeAirports(simState) {
+  const finalizada = simState?.finalizada === true
   return getAeropuertos(simState).map((airport) => {
     if (airport.codigoIATA) {
+      const liveCount = Number(airport.ocupacionActual || 0)
+      const cap = Number(airport.capacidadAlmacen || 0)
+      const livePct = cap > 0 ? (liveCount / cap) * 100 : 0
+      // After simulation ends, ocupacionActual=0 (all bags delivered). Use the
+      // historical average accumulated during the run for percentage-based displays
+      // (continent breakdown, Ocup.promedio KPI) while keeping bag-count fields intact.
+      const occupationPct = finalizada ? Number(airport.ocupacionPromedio || 0) : livePct
       return {
         id: airport.codigoIATA,
         city: airport.ciudad,
         continent: airport.continente,
-        capacity: Number(airport.capacidadAlmacen || 0),
-        occupation: Number(airport.ocupacionActual || 0),
+        capacity: cap,
+        occupation: liveCount,
+        occupationPct,
         semaforo: airport.semaforo || 'verde',
         raw: airport,
       }
@@ -61,6 +70,7 @@ function normalizeAirports(simState) {
       continent: airport.continent,
       capacity: Number(airport.warehouseCapacity || 0),
       occupation: Number(airport.currentOccupation || 0),
+      occupationPct: pct,
       semaforo,
       raw: {
         codigoIATA: airport.id,
@@ -142,7 +152,7 @@ export default function DashboardScreen({ simState }) {
       vuelosActivos: Number(value?.activeFlights || 0),
       slaVencidos: Number(value?.slaViolated || 0),
       ocupPromedio: airports.length
-        ? airports.reduce((acc, airport) => acc + ((airport.capacity ? airport.occupation / airport.capacity : 0) * 100), 0) / airports.length
+        ? airports.reduce((acc, airport) => acc + (airport.occupationPct || 0), 0) / airports.length
         : 0,
     }
   }, [simState, airports])
@@ -208,7 +218,7 @@ export default function DashboardScreen({ simState }) {
       const aps = airports.filter((airport) => airport.continent === continent)
       const vuelos = flights.filter((flight) => index[flight.origen]?.continent === continent)
       const ocupProm = aps.length
-        ? aps.reduce((acc, airport) => acc + (airport.capacity ? (airport.occupation / airport.capacity) * 100 : 0), 0) / aps.length
+        ? aps.reduce((acc, airport) => acc + (airport.occupationPct || 0), 0) / aps.length
         : 0
 
       return {
@@ -221,11 +231,7 @@ export default function DashboardScreen({ simState }) {
   }, [airports, flights])
 
   const airportRows = useMemo(() => {
-    return [...airports].sort((a, b) => {
-      const pa = a.capacity ? a.occupation / a.capacity : 0
-      const pb = b.capacity ? b.occupation / b.capacity : 0
-      return pb - pa
-    })
+    return [...airports].sort((a, b) => (b.occupationPct || 0) - (a.occupationPct || 0))
   }, [airports])
 
   const kpiCells = [
@@ -302,7 +308,7 @@ export default function DashboardScreen({ simState }) {
         </div>
 
         {airportRows.map((airport) => {
-          const pct = airport.capacity ? Math.round((airport.occupation / airport.capacity) * 100) : 0
+          const pct = Math.round(airport.occupationPct || 0)
           const semaforo = airport.semaforo || (pct >= 85 ? 'rojo' : pct >= 60 ? 'ambar' : 'verde')
           const estado = semaforo === 'rojo' ? 'CRÍTICO' : semaforo === 'ambar' ? 'ALTO' : 'NORMAL'
           const color = semaforoColor(semaforo)

@@ -78,7 +78,9 @@ public class SimulationController {
                 .collect(Collectors.toMap(Aeropuerto::getCodigoIATA, Aeropuerto::getContinente, (a, b) -> a));
 
             LocalDate dateFrom = params.getFechaInicio();
-            LocalDate dateTo = params.getFechaInicio().plusDays(params.getDiasSimulacion());
+            // dateTo is the last simulated day (inclusive). plusDays(n-1) because day 1 is
+            // fechaInicio itself, day 2 is +1, …, day n is +(n-1).
+            LocalDate dateTo = params.getFechaInicio().plusDays(params.getDiasSimulacion() - 1);
             List<Envio> envios = new ArrayList<>();
 
             for (MultipartFile file : files) {

@@ -137,13 +137,13 @@ export default function ResultadosScreen({ simState }) {
 
   const airportRows = useMemo(() => airports
     .map((airport) => {
-      const pct = airport.capacidadAlmacen ? (airport.ocupacionActual / airport.capacidadAlmacen) * 100 : 0
+      const livePct = airport.capacidadAlmacen ? (airport.ocupacionActual / airport.capacidadAlmacen) * 100 : 0
       return {
         aeropuerto: airport.codigoIATA,
-        recib: airport.ocupacionActual,
-        enviad: airport.ocupacionActual,
-        ocupProm: Number(pct.toFixed(1)),
-        ocupMax: Number(pct.toFixed(1)),
+        recib: airport.maletasRecibidas ?? airport.ocupacionActual,
+        enviad: airport.maletasEnviadas ?? airport.ocupacionActual,
+        ocupProm: Number((airport.ocupacionPromedio != null ? airport.ocupacionPromedio : livePct).toFixed(1)),
+        ocupMax: Number((airport.ocupacionMaxima != null ? airport.ocupacionMaxima : livePct).toFixed(1)),
         estado: semaforoLabel(airport.semaforo),
         semaforo: airport.semaforo,
       }

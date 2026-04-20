@@ -119,8 +119,25 @@ public class SimulationEngine {
 
         addOperationLog("Processing day " + diaActual);
 
-        processDepartures();
-        processArrivals();
+        // Vuelos have only LocalTime (daily repeating schedule). Cancellations from a
+        // previous simulated day must be reset so that the same flight can operate again.
+        vuelos.forEach(v -> v.setCancelado(false));
+
+        // Snapshot warehouse state at the START of the day — before any departures or
+        // deliveries — so that [OCUPACION] logs capture origin warehouses (e.g. OJAI)
+        // while bags are still present. The end-of-day call below reflects the
+        // post-delivery state and updates the domain field used by the API.
+        updateWarehouseOccupation();
+        accumulateOccupationSample();
+
+        // Run up to 3 passes so that same-day connections work correctly.
+        // On pass 1: leg-1 bags depart and arrive at the intermediate hub.
+        // On pass 2: leg-2 bags depart from the hub (now EN_ALMACEN) and arrive at destination.
+        // The existing state machine (EN_ALMACEN→EN_VUELO→EN_ALMACEN) prevents double-processing.
+        for (int pass = 0; pass < 3; pass++) {
+            processDepartures();
+            processArrivals();
+        }
         log.info("After arrivals: total maletas={}, EN_ALMACEN={}, EN_VUELO={}",
             maletas.size(),
             maletas.stream().filter(m -> m.getEstado() == EstadoMaleta.EN_ALMACEN).count(),
@@ -148,10 +165,64 @@ public class SimulationEngine {
         if (diaActual >= params.getDiasSimulacion()) {
             this.finalizada = true;
             this.enEjecucion = false;
-            // Mark any envío still not delivered as RETRASADO
+
+            // Only mark RETRASADO for shipments whose SLA deadline falls within the
+            // simulation window. A shipment whose deadline is after the last simulated
+            // day is "in progress" — its deadline has not been reached, so penalising it
+            // would distort the SLA metric.
+            //
+            // simulationEndDate = fechaInicio + (diasSimulacion - 1) because day 1 IS
+            // fechaInicio, day 2 is +1, …, day n is +(n-1).
+            LocalDate simulationEndDate = params.getFechaInicio().plusDays(params.getDiasSimulacion() - 1);
             envios.stream()
                 .filter(e -> e.getEstado() != EstadoEnvio.ENTREGADO && e.getEstado() != EstadoEnvio.RETRASADO)
-                .forEach(e -> e.setEstado(EstadoEnvio.RETRASADO));
+                .forEach(e -> {
+                    LocalDate deadline = e.getFechaHoraIngreso().plusDays(e.getSla()).toLocalDate();
+                    if (!deadline.isAfter(simulationEndDate)) {
+                        // Deadline was within the simulation window and the bag was not
+                        // delivered → genuine SLA violation.
+                        e.setEstado(EstadoEnvio.RETRASADO);
+                    }
+                    // else: deadline is beyond simulationEndDate → bag is still "in
+                    // progress"; leave its current state so buildKpis() can distinguish it.
+                });
+
+            // ── SLA AUDIT ────────────────────────────────────────────────────────────
+            // Evaluable = shipments that arrived strictly before the simulation end
+            // date (i.e., had at least one day to be processed). Using the arrival
+            // date rather than the computed deadline avoids a dependency on e.getSla(),
+            // which can be overwritten by enforceSlaFromContinent() and would exclude
+            // valid Day-2 intercontinental shipments (deadline = simEnd+1) from the
+            // denominator even though those shipments ran through the simulation.
+            //
+            // For a 3-day run (Jan-2 → Jan-4):
+            //   Day-1 Jan-2: isBefore(Jan-4) = true  → evaluable
+            //   Day-2 Jan-3: isBefore(Jan-4) = true  → evaluable
+            //   Day-3 Jan-4: isBefore(Jan-4) = false → not evaluable (no time)
+            long auditEvaluable = envios.stream()
+                .filter(e -> e.getFechaHoraIngreso().toLocalDate().isBefore(simulationEndDate))
+                .count();
+            long auditEntregado = envios.stream()
+                .filter(e -> e.getEstado() == EstadoEnvio.ENTREGADO)
+                .filter(e -> e.getFechaHoraIngreso().toLocalDate().isBefore(simulationEndDate))
+                .count();
+            long auditRetrasado = envios.stream()
+                .filter(e -> e.getEstado() == EstadoEnvio.RETRASADO)
+                .filter(e -> e.getFechaHoraIngreso().toLocalDate().isBefore(simulationEndDate))
+                .count();
+            long auditInProgress = envios.stream()
+                .filter(e -> e.getEstado() != EstadoEnvio.ENTREGADO && e.getEstado() != EstadoEnvio.RETRASADO)
+                .filter(e -> e.getFechaHoraIngreso().toLocalDate().isBefore(simulationEndDate))
+                .count();
+            double auditSla = auditEvaluable == 0 ? 0.0
+                : Math.round(auditEntregado * 1000.0 / auditEvaluable) / 10.0;
+            log.info("[SLA AUDIT] Total shipments in period: {} | ENTREGADO: {} | RETRASADO: {} | IN_PROGRESS: {} | SLA%: {}% | Denominador: {}",
+                auditEvaluable, auditEntregado, auditRetrasado, auditInProgress, auditSla, auditEvaluable);
+            addOperationLog(String.format(
+                "[SLA AUDIT] period=%d ENTREGADO=%d RETRASADO=%d IN_PROGRESS=%d SLA=%.1f%%",
+                auditEvaluable, auditEntregado, auditRetrasado, auditInProgress, auditSla));
+            // ─────────────────────────────────────────────────────────────────────────
+
             addOperationLog("Simulation completed - Day " + diaActual);
             return getEstado();
         }
@@ -293,6 +364,7 @@ public class SimulationEngine {
         LocalDate today = fechaSimulada.toLocalDate();
         Map<String, Envio> envioById = envios.stream().collect(Collectors.toMap(Envio::getIdEnvio, e -> e, (a, b) -> a));
         Map<String, Vuelo> vueloByCode = vuelos.stream().collect(Collectors.toMap(Vuelo::getCodigoVuelo, v -> v, (a, b) -> a));
+        Map<String, Aeropuerto> airportByCode = aeropuertos.stream().collect(Collectors.toMap(Aeropuerto::getCodigoIATA, a -> a, (a, b) -> a));
 
         for (PlanDeViaje plan : planes) {
             Envio envio = envioById.get(plan.getIdEnvio());
@@ -325,6 +397,10 @@ public class SimulationEngine {
                     if (envio.getEstado() != EstadoEnvio.RETRASADO) {
                         envio.setEstado(EstadoEnvio.EN_TRANSITO);
                     }
+                    Aeropuerto originAirport = airportByCode.get(legOrigin);
+                    if (originAirport != null) {
+                        originAirport.setMaletasEnviadas(originAirport.getMaletasEnviadas() + maletasEnvio.size());
+                    }
                 }
             }
         }
@@ -333,6 +409,7 @@ public class SimulationEngine {
     private void processArrivals() {
         LocalDate today = fechaSimulada.toLocalDate();
         Map<String, Vuelo> vueloByCode = vuelos.stream().collect(Collectors.toMap(Vuelo::getCodigoVuelo, v -> v, (a, b) -> a));
+        Map<String, Aeropuerto> airportByCode = aeropuertos.stream().collect(Collectors.toMap(Aeropuerto::getCodigoIATA, a -> a, (a, b) -> a));
 
         for (PlanDeViaje plan : planes) {
             for (var escala : plan.getEscalas()) {
@@ -354,10 +431,12 @@ public class SimulationEngine {
                     maleta.setUbicacionActual(escala.getCodigoAeropuerto());
                     maleta.setEstado(EstadoMaleta.EN_ALMACEN);
                     maletaVueloActual.remove(maleta.getIdMaleta());
-                    log.info("Maleta {} arrived at {} estado={}",
-                        maleta.getIdMaleta(),
-                        maleta.getUbicacionActual(),
-                        maleta.getEstado());
+                }
+                if (!inFlight.isEmpty()) {
+                    Aeropuerto arrivalAirport = airportByCode.get(escala.getCodigoAeropuerto());
+                    if (arrivalAirport != null) {
+                        arrivalAirport.setMaletasRecibidas(arrivalAirport.getMaletasRecibidas() + inFlight.size());
+                    }
                 }
 
                 vuelo.setCargaActual(Math.max(0, vuelo.getCargaActual() - inFlight.size()));
@@ -460,10 +539,31 @@ public class SimulationEngine {
                 .build();
             cancelaciones.add(cancelacion);
 
+            // Bags that are still physically on this flight (EN_VUELO) need immediate replanning.
+            // NOTE: with the multi-pass departure/arrival loop, all bags should have already
+            // landed by the time this code runs, so EN_VUELO will normally be empty here.
             List<Maleta> affected = maletas.stream()
                 .filter(m -> m.getEstado() == EstadoMaleta.EN_VUELO)
                 .filter(m -> vuelo.getCodigoVuelo().equals(maletaVueloActual.get(m.getIdMaleta())))
                 .toList();
+
+            // Log any EN_ALMACEN bags whose next planned leg is this cancelled flight so
+            // they are visible in the operation log. These bags do NOT need an explicit
+            // replan here: vuelo.cancelado is reset at the start of the next simulated day
+            // (Vuelo is a daily repeating schedule), so the flight will be available again
+            // tomorrow and their existing plan remains valid.
+            long strandedCount = planes.stream()
+                .filter(plan -> plan.getEscalas().stream()
+                    .anyMatch(e -> vuelo.getCodigoVuelo().equals(e.getCodigoVuelo())
+                        && e.getHoraSalidaEst() != null && today != null
+                        && e.getHoraSalidaEst().toLocalDate().isAfter(today)))
+                .map(PlanDeViaje::getIdEnvio)
+                .distinct().count();
+            if (strandedCount > 0) {
+                addOperationLog("INFO flight " + vuelo.getCodigoVuelo()
+                    + " cancelled; " + strandedCount + " future-day plan(s) use it"
+                    + " — cancellation will be reset before next day processing");
+            }
 
             addOperationLog("Flight cancelled " + vuelo.getCodigoVuelo() + " with " + affected.size() + " affected maletas");
             replanificar(affected);
@@ -477,9 +577,26 @@ public class SimulationEngine {
 
         for (Aeropuerto aeropuerto : aeropuertos) {
             long count = counts.getOrDefault(aeropuerto.getCodigoIATA(), 0L);
-            log.info("Recalc: airport {} has {} maletas EN_ALMACEN",
-                aeropuerto.getCodigoIATA(), count);
             aeropuerto.setOcupacionActual((int) count);
+            if (count > 0) {
+                int cap = aeropuerto.getCapacidadAlmacen();
+                double pct = cap > 0 ? (count * 100.0 / cap) : 0.0;
+                log.info("[OCUPACION] Airport: {} | Bags in warehouse: {} | Capacity: {} | Occupation: {}%",
+                    aeropuerto.getCodigoIATA(), count, cap, String.format("%.1f", pct));
+            }
+        }
+    }
+
+    private void accumulateOccupationSample() {
+        for (Aeropuerto aeropuerto : aeropuertos) {
+            int count = aeropuerto.getOcupacionActual();
+            int cap = aeropuerto.getCapacidadAlmacen();
+            double pct = cap > 0 ? (count * 100.0 / cap) : 0.0;
+            aeropuerto.setOcupacionPorcentajeSuma(aeropuerto.getOcupacionPorcentajeSuma() + pct);
+            aeropuerto.setOcupacionMuestras(aeropuerto.getOcupacionMuestras() + 1);
+            if (count > aeropuerto.getOcupacionMaximaBolsas()) {
+                aeropuerto.setOcupacionMaximaBolsas(count);
+            }
         }
     }
 
@@ -503,15 +620,49 @@ public class SimulationEngine {
             .collect(Collectors.toSet());
         int vuelosActivos = vuelosEnUso.size();
         int slaVencidos = (int) envios.stream().filter(e -> e.getEstado() == EstadoEnvio.RETRASADO).count();
-        long totalEnvios = envios.size();
-        long entregadosEnSla = envios.stream()
-            .filter(e -> e.getEstado() == EstadoEnvio.ENTREGADO)
-            .count();
+
+        // SLA compliance denominator: shipments that arrived strictly before the
+        // simulation end date (had at least one simulated day to be processed).
+        // Using arrival date avoids depending on e.getSla(), which can be
+        // overwritten by enforceSlaFromContinent() and would incorrectly exclude
+        // Day-2 intercontinental shipments (deadline = simEnd+1) from the denominator.
+        LocalDate simEnd = params == null ? null
+            : params.getFechaInicio().plusDays(params.getDiasSimulacion() - 1);
+        long totalEnvios = simEnd == null ? envios.size()
+            : envios.stream()
+                .filter(e -> e.getFechaHoraIngreso().toLocalDate().isBefore(simEnd))
+                .count();
+        long entregadosEnSla = simEnd == null
+            ? envios.stream().filter(e -> e.getEstado() == EstadoEnvio.ENTREGADO).count()
+            : envios.stream()
+                .filter(e -> e.getEstado() == EstadoEnvio.ENTREGADO)
+                .filter(e -> e.getFechaHoraIngreso().toLocalDate().isBefore(simEnd))
+                .count();
         double cumplimientoSla = totalEnvios == 0 ? 0.0 : Math.round(entregadosEnSla * 1000.0 / totalEnvios) / 10.0;
-        double ocupacionPromedio = aeropuertos.stream()
-            .mapToDouble(a -> a.getCapacidadAlmacen() == 0 ? 0.0 : (a.getOcupacionActual() * 100.0d / a.getCapacidadAlmacen()))
-            .average()
-            .orElse(0.0d);
+        // When the simulation is finalised all bags are ENTREGADA so the live stream
+        // would return 0. Use the historical average accumulated by accumulateOccupationSample()
+        // instead. During the simulation (finalizada=false) keep the live computation so
+        // that the map still shows real-time occupation correctly.
+        double ocupacionPromedio;
+        if (finalizada) {
+            ocupacionPromedio = aeropuertos.stream()
+                .mapToDouble(a -> a.getOcupacionMuestras() == 0 ? 0.0
+                    : a.getOcupacionPorcentajeSuma() / a.getOcupacionMuestras())
+                .average()
+                .orElse(0.0d);
+        } else {
+            Map<String, Long> liveOcupacion = maletas.stream()
+                .filter(m -> m.getEstado() == EstadoMaleta.EN_ALMACEN)
+                .collect(Collectors.groupingBy(Maleta::getUbicacionActual, Collectors.counting()));
+            ocupacionPromedio = aeropuertos.stream()
+                .mapToDouble(a -> {
+                    if (a.getCapacidadAlmacen() == 0) return 0.0;
+                    long bagCount = liveOcupacion.getOrDefault(a.getCodigoIATA(), 0L);
+                    return bagCount * 100.0d / a.getCapacidadAlmacen();
+                })
+                .average()
+                .orElse(0.0d);
+        }
 
         return KpisDTO.builder()
             .maletasEnTransito(maletasEnTransito)
@@ -546,6 +697,11 @@ public class SimulationEngine {
             }
         }
 
+        double ocupProm = airport.getOcupacionMuestras() == 0 ? 0.0
+            : airport.getOcupacionPorcentajeSuma() / airport.getOcupacionMuestras();
+        double ocupMax = capacidad > 0
+            ? (airport.getOcupacionMaximaBolsas() * 100.0 / capacidad) : 0.0;
+
         return AeropuertoDTO.builder()
             .codigoIATA(airport.getCodigoIATA())
             .nombre(airport.getNombre())
@@ -556,6 +712,10 @@ public class SimulationEngine {
             .capacidadAlmacen(capacidad)
             .ocupacionActual(ocupacion)
             .semaforo(semaforo)
+            .maletasRecibidas(airport.getMaletasRecibidas())
+            .maletasEnviadas(airport.getMaletasEnviadas())
+            .ocupacionPromedio(ocupProm)
+            .ocupacionMaxima(ocupMax)
             .build();
     }
 
