@@ -12,7 +12,10 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class ParametrosSimulacion {
     private String algoritmo;
+    private Integer dias;
     private int diasSimulacion;
+    @Builder.Default
+    private Boolean esColapso = false;
     private int capacidadAlmacen;
     private int capacidadVuelo;
     @Builder.Default

@@ -89,6 +89,27 @@ class PlanningServiceIntegrationTest {
         System.out.println("METRICA_SAMPLE_SA=" + result.getMetrica());
     }
 
+    @Test
+    void planificaConIncidenciaUsaTabuSearch() {
+        ParametrosSimulacion params = baseParams("SIMULATED_ANNEALING");
+
+        PlanningResult result = planningService.planificarConIncidencia(
+            copyEnvios(sampleEnvios),
+            dataLoaderService.getVuelos(),
+            dataLoaderService.getAeropuertos(),
+            params
+        );
+
+        assertNotNull(result);
+        assertNotNull(result.getMetrica());
+        assertEquals("TABU_SEARCH", result.getMetrica().getAlgoritmoUsado());
+        assertTrue(result.getMetrica().getTiempoEjecucionMs() > 0);
+        assertTrue(result.getMetrica().getRutasEvaluadas() > 0);
+        assertFalse(result.getPlanes().isEmpty());
+        assertTrue(result.getPlanes().stream().allMatch(plan -> "TABU_SEARCH".equals(plan.getAlgoritmoUsado())));
+        System.out.println("METRICA_SAMPLE_TS=" + result.getMetrica());
+    }
+
     private ParametrosSimulacion baseParams(String algorithm) {
         return ParametrosSimulacion.builder()
             .algoritmo(algorithm)

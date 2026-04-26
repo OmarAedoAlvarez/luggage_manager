@@ -78,7 +78,15 @@ public class SimulationEngine {
         reset();
         this.params = params;
         this.aeropuertos = deepCopyAeropuertos(dataLoaderService.getAeropuertos());
+        if (params.getCapacidadAlmacen() > 0) {
+            this.aeropuertos.forEach(a -> a.setCapacidadAlmacen(params.getCapacidadAlmacen()));
+        }
+
         this.vuelos = deepCopyVuelos(dataLoaderService.getVuelos());
+        if (params.getCapacidadVuelo() > 0) {
+            this.vuelos.forEach(v -> v.setCapacidadTotal(params.getCapacidadVuelo()));
+        }
+
         this.envios = deepCopyEnvios(enviosInput);
         this.maletas = generarMaletas(this.envios);
         this.planes = new ArrayList<>();
@@ -107,8 +115,11 @@ public class SimulationEngine {
         this.finalizada = false;
         updateWarehouseOccupation();
 
+        String algoritmoInicial = Optional.ofNullable(planning.getMetrica())
+            .map(MetricaAlgoritmo::getAlgoritmoUsado)
+            .orElse("N/A");
         addOperationLog("Simulation initialized - Day 1 - " + this.envios.size()
-            + " envios - algorithm: " + this.params.getAlgoritmo()
+            + " envios - algorithm: " + algoritmoInicial
             + " - routes evaluated: " + Optional.ofNullable(planning.getMetrica()).map(MetricaAlgoritmo::getRutasEvaluadas).orElse(0));
     }
 
@@ -130,6 +141,10 @@ public class SimulationEngine {
         updateWarehouseOccupation();
         accumulateOccupationSample();
 
+        // Process disruptions before departures so cancellation impacts today's plan
+        // and triggers immediate replanning.
+        cancelRandomFlightsAndReplan();
+
         // Run up to 3 passes so that same-day connections work correctly.
         // On pass 1: leg-1 bags depart and arrive at the intermediate hub.
         // On pass 2: leg-2 bags depart from the hub (now EN_ALMACEN) and arrive at destination.
@@ -144,7 +159,6 @@ public class SimulationEngine {
             maletas.stream().filter(m -> m.getEstado() == EstadoMaleta.EN_VUELO).count());
         DeliveryStats deliveryStats = processDeliveries();
         checkSlaViolations();
-        cancelRandomFlightsAndReplan();
         updateWarehouseOccupation();
         aeropuertos.forEach(ap ->
             log.info("Airport {} ocupacion={} maletas_en_almacen={}",
@@ -235,6 +249,10 @@ public class SimulationEngine {
     }
 
     public synchronized void replanificar(List<Maleta> affectedMaletas) {
+        replanificar(affectedMaletas, false);
+    }
+
+    private synchronized void replanificar(List<Maleta> affectedMaletas, boolean porIncidencia) {
         long start = System.currentTimeMillis();
         if (affectedMaletas == null || affectedMaletas.isEmpty()) {
             return;
@@ -250,7 +268,9 @@ public class SimulationEngine {
             return;
         }
 
-        PlanningResult result = planningService.planificar(afectados, vuelos, aeropuertos, params);
+        PlanningResult result = porIncidencia
+            ? planningService.planificarConIncidencia(afectados, vuelos, aeropuertos, params)
+            : planningService.planificar(afectados, vuelos, aeropuertos, params);
         if (result.getMetrica() != null) {
             metricas.add(result.getMetrica());
         }
@@ -268,9 +288,16 @@ public class SimulationEngine {
         }
 
         long elapsed = System.currentTimeMillis() - start;
-        addOperationLog("Replanification executed for " + afectados.size() + " envios in " + elapsed + " ms");
+        String algorithmUsed = Optional.ofNullable(result.getMetrica()).map(MetricaAlgoritmo::getAlgoritmoUsado).orElse("N/A");
+        if (sinRuta.isEmpty()) {
+            addOperationLog(String.format("[LOG] Replanificación exitosa (%s) en %d ms.", algorithmUsed, elapsed));
+        } else {
+            addOperationLog(String.format("[ALERTA] Replanificación parcial (%s). %d envíos se quedaron sin ruta viable.", 
+                algorithmUsed, sinRuta.size()));
+        }
+
         if (elapsed > 10_000) {
-            addOperationLog("WARNING replanification exceeded 10 seconds (RF 33): " + elapsed + " ms");
+            addOperationLog("[ADVERTENCIA] La replanificación excedió los 10 segundos (RF 33): " + elapsed + " ms");
         }
     }
 
@@ -303,7 +330,7 @@ public class SimulationEngine {
             .diaActual(diaActual)
             .totalDias(params.getDiasSimulacion())
             .fechaSimulada(fechaSimulada.format(TS_FORMAT))
-            .algoritmo(params.getAlgoritmo())
+            .algoritmo(metricas.isEmpty() ? params.getAlgoritmo() : metricas.get(metricas.size() - 1).getAlgoritmoUsado())
             .enEjecucion(enEjecucion)
             .finalizada(finalizada)
             .aeropuertos(aeropuertos.stream().map(this::toAeropuertoDto).toList())
@@ -509,65 +536,84 @@ public class SimulationEngine {
     }
 
     private void cancelRandomFlightsAndReplan() {
-        double probability = 0.05d + (random.nextDouble() * 0.03d);
         LocalDate today = fechaSimulada == null ? null : fechaSimulada.toLocalDate();
+        if (today == null) return;
+
+        List<Vuelo> cancelledToday = detectCancellations(today);
+        for (Vuelo vuelo : cancelledToday) {
+            List<Maleta> affected = rescueBags(vuelo, today);
+            if (!affected.isEmpty()) {
+                addOperationLog(String.format("[INCIDENCIA] Vuelo %s cancelado. Rescatadas %d maletas. Iniciando replanificación...", 
+                    vuelo.getCodigoVuelo(), affected.size()));
+                replanificar(affected, true);
+            } else {
+                addOperationLog("[INCIDENCIA] Vuelo " + vuelo.getCodigoVuelo() + " cancelado. Sin maletas afectadas hoy.");
+            }
+        }
+    }
+
+    private List<Vuelo> detectCancellations(LocalDate today) {
+        double probability = 0.05d + (random.nextDouble() * 0.03d);
         Set<String> plannedToday = planes.stream()
             .flatMap(plan -> plan.getEscalas().stream())
-            .filter(escala -> escala.getHoraSalidaEst() != null && today != null &&
-                escala.getHoraSalidaEst().toLocalDate().equals(today))
+            .filter(e -> e.getHoraSalidaEst() != null && e.getHoraSalidaEst().toLocalDate().equals(today))
             .map(Escala::getCodigoVuelo)
             .collect(Collectors.toSet());
 
+        List<Vuelo> cancelled = new ArrayList<>();
         for (Vuelo vuelo : vuelos) {
-            if (!plannedToday.contains(vuelo.getCodigoVuelo())) {
-                continue;
+            if (!plannedToday.contains(vuelo.getCodigoVuelo()) || vuelo.isCancelado()) continue;
+            if (random.nextDouble() < probability) {
+                vuelo.setCancelado(true);
+                cancelaciones.add(Cancelacion.builder()
+                    .id("CAN-" + vuelo.getCodigoVuelo() + "-" + System.nanoTime())
+                    .codigoVuelo(vuelo.getCodigoVuelo())
+                    .fecha(today)
+                    .hora(LocalTime.now())
+                    .motivo("Random disruption event")
+                    .build());
+                cancelled.add(vuelo);
             }
-            if (vuelo.isCancelado()) {
-                continue;
-            }
-            if (random.nextDouble() >= probability) {
-                continue;
-            }
-
-            vuelo.setCancelado(true);
-            Cancelacion cancelacion = Cancelacion.builder()
-                .id("CAN-" + vuelo.getCodigoVuelo() + "-" + System.nanoTime())
-                .codigoVuelo(vuelo.getCodigoVuelo())
-                .fecha(fechaSimulada.toLocalDate())
-                .hora(LocalTime.now())
-                .motivo("Random disruption event")
-                .build();
-            cancelaciones.add(cancelacion);
-
-            // Bags that are still physically on this flight (EN_VUELO) need immediate replanning.
-            // NOTE: with the multi-pass departure/arrival loop, all bags should have already
-            // landed by the time this code runs, so EN_VUELO will normally be empty here.
-            List<Maleta> affected = maletas.stream()
-                .filter(m -> m.getEstado() == EstadoMaleta.EN_VUELO)
-                .filter(m -> vuelo.getCodigoVuelo().equals(maletaVueloActual.get(m.getIdMaleta())))
-                .toList();
-
-            // Log any EN_ALMACEN bags whose next planned leg is this cancelled flight so
-            // they are visible in the operation log. These bags do NOT need an explicit
-            // replan here: vuelo.cancelado is reset at the start of the next simulated day
-            // (Vuelo is a daily repeating schedule), so the flight will be available again
-            // tomorrow and their existing plan remains valid.
-            long strandedCount = planes.stream()
-                .filter(plan -> plan.getEscalas().stream()
-                    .anyMatch(e -> vuelo.getCodigoVuelo().equals(e.getCodigoVuelo())
-                        && e.getHoraSalidaEst() != null && today != null
-                        && e.getHoraSalidaEst().toLocalDate().isAfter(today)))
-                .map(PlanDeViaje::getIdEnvio)
-                .distinct().count();
-            if (strandedCount > 0) {
-                addOperationLog("INFO flight " + vuelo.getCodigoVuelo()
-                    + " cancelled; " + strandedCount + " future-day plan(s) use it"
-                    + " — cancellation will be reset before next day processing");
-            }
-
-            addOperationLog("Flight cancelled " + vuelo.getCodigoVuelo() + " with " + affected.size() + " affected maletas");
-            replanificar(affected);
         }
+        return cancelled;
+    }
+
+    private List<Maleta> rescueBags(Vuelo vuelo, LocalDate today) {
+        Set<String> affectedEnvioIds = planes.stream()
+            .filter(plan -> plan.getEscalas().stream()
+                .anyMatch(e -> vuelo.getCodigoVuelo().equals(e.getCodigoVuelo())
+                    && e.getHoraSalidaEst() != null
+                    && e.getHoraSalidaEst().toLocalDate().equals(today)))
+            .map(PlanDeViaje::getIdEnvio)
+            .collect(Collectors.toSet());
+
+        if (affectedEnvioIds.isEmpty()) return List.of();
+
+        List<Maleta> affected = new ArrayList<>();
+        int unloadedCount = 0;
+        for (Maleta maleta : maletas) {
+            if (!affectedEnvioIds.contains(maleta.getIdEnvio()) || maleta.getEstado() == EstadoMaleta.ENTREGADA) continue;
+
+            // If it was supposed to be in this flight, put it back in the warehouse at the origin
+            boolean wasInCanceledFlight = maleta.getEstado() == EstadoMaleta.EN_VUELO
+                && vuelo.getCodigoVuelo().equals(maletaVueloActual.get(maleta.getIdMaleta()));
+            
+            if (wasInCanceledFlight) {
+                maleta.setEstado(EstadoMaleta.EN_ALMACEN);
+                maleta.setUbicacionActual(vuelo.getOrigen());
+                maletaVueloActual.remove(maleta.getIdMaleta());
+                unloadedCount++;
+            }
+
+            if (maleta.getEstado() == EstadoMaleta.EN_ALMACEN || maleta.getEstado() == EstadoMaleta.RETRASADA) {
+                affected.add(maleta);
+            }
+        }
+
+        if (unloadedCount > 0) {
+            vuelo.setCargaActual(Math.max(0, vuelo.getCargaActual() - unloadedCount));
+        }
+        return affected;
     }
 
     private void updateWarehouseOccupation() {

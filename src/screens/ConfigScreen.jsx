@@ -88,10 +88,13 @@ export default function ConfigScreen({ onCancel, onSimulationStarted }) {
   }
 
   async function handleSimular() {
+    const esColapso = periodo === 'COLAPSO'
+    const dias = esColapso ? 0 : Number.parseInt(periodo, 10)
     const params = {
       algoritmo: 'SIMULATED_ANNEALING',
-      diasSimulacion: parseInt(periodo === 'COLAPSO' ? '999' : periodo, 10),
-      capacidadAlmacen: 600,
+      dias,
+      esColapso,
+      capacidadAlmacen: 800,
       capacidadVuelo: 300,
       minutosEscalaMinima: 10,
       minutosRecogidaDestino: 10,
@@ -105,6 +108,8 @@ export default function ConfigScreen({ onCancel, onSimulationStarted }) {
       fechaInicio,
       horaInicio,
       periodo,
+      esColapso,
+      dias,
       fileCount: files.length,
       fileNames: files.map((file) => file.name),
       params,

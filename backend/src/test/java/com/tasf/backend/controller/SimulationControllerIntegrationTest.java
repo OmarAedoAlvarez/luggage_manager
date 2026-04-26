@@ -27,7 +27,8 @@ class SimulationControllerIntegrationTest {
         String paramsJson = """
             {
               \"algoritmo\": \"SIMULATED_ANNEALING\",
-              \"diasSimulacion\": 3,
+                            \"dias\": 3,
+                            \"esColapso\": false,
               \"capacidadAlmacen\": 1000,
               \"capacidadVuelo\": 360,
               \"minutosEscalaMinima\": 10,
