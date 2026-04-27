@@ -133,6 +133,18 @@ public class SimulationController {
         return ResponseEntity.ok().build();
     }
 
+    @PostMapping("/simulation/cancel-flight/{codigoVuelo}")
+    public ResponseEntity<SimulationStateDTO> cancelFlight(@PathVariable String codigoVuelo) {
+        simulationEngine.cancelarVueloManualmente(codigoVuelo);
+        return ResponseEntity.ok(simulationEngine.getEstado());
+    }
+
+    @PostMapping("/simulation/cancel-envio/{idEnvio}")
+    public ResponseEntity<SimulationStateDTO> cancelEnvio(@PathVariable String idEnvio) {
+        simulationEngine.cancelarEnvioManualmente(idEnvio);
+        return ResponseEntity.ok(simulationEngine.getEstado());
+    }
+
     @GetMapping("/airports")
     public ResponseEntity<List<AeropuertoDTO>> airports() {
         return ResponseEntity.ok(simulationEngine.getAeropuertosEstado());

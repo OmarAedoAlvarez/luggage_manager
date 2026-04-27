@@ -71,7 +71,8 @@ public class PlanningService {
     }
 
     private MetaheuristicAlgorithm selectAlgorithm(int enviosCount, boolean conIncidencia) {
-        String selectedName = (conIncidencia || enviosCount >= COMPLEXITY_THRESHOLD_FOR_TABU) ? TS : SA;
+        // Default to Simulated Annealing. Use Tabu Search for incidents/re-planning.
+        String selectedName = conIncidencia ? TS : SA;
         MetaheuristicAlgorithm selected = algorithms.get(selectedName);
         if (selected == null) {
             throw new IllegalStateException("Algorithm not configured: " + selectedName);

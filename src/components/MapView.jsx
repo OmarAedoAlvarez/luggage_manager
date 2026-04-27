@@ -5,7 +5,23 @@ import { getWarehouseStatus, STATUS_COLOR } from '../simulation/statusRules.js'
 
 function FitBounds() {
   const map = useMap()
-  useEffect(() => { map.setView([20, 10], 2) }, [map])
+  useEffect(() => {
+    const container = map.getContainer()
+    const updateZoom = () => {
+      const w = container.clientWidth
+      if (w === 0) return
+      // Calculate zoom needed to make world (256px at z=0) fill width w
+      const idealZoom = Math.log2(w / 256)
+      map.setMinZoom(idealZoom)
+      if (map.getZoom() < idealZoom) {
+        map.setZoom(idealZoom)
+      }
+    }
+    const observer = new ResizeObserver(updateZoom)
+    observer.observe(container)
+    updateZoom()
+    return () => observer.disconnect()
+  }, [map])
   return null
 }
 
@@ -105,8 +121,11 @@ export default function MapView({
 
   return (
     <MapContainer
-      center={[20, 10]} zoom={2}
-      style={{ width: '100%', height: '100%', background: '#090e19' }}
+      center={[20, 10]} zoom={2.2} minZoom={2}
+      zoomSnap={0.1}
+      maxBounds={[[-90, -180], [90, 180]]}
+      maxBoundsViscosity={1.0}
+      style={{ width: '100%', height: '100%', background: '#060606' }}
       zoomControl={false} attributionControl={false}
     >
       <FitBounds />
@@ -115,7 +134,7 @@ export default function MapView({
         url={theme === 'light'
           ? 'https://{s}.basemaps.cartocdn.com/light_nolabels/{z}/{x}/{y}{r}.png'
           : 'https://{s}.basemaps.cartocdn.com/dark_nolabels/{z}/{x}/{y}{r}.png'}
-        subdomains="abcd" maxZoom={19}
+        subdomains="abcd" maxZoom={19} noWrap={true}
       />
 
       {/* ── ROUTE LINES ───────────────────────────────────────────────────── */}

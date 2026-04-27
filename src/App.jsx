@@ -6,6 +6,7 @@ import TopBar from './components/TopBar.jsx'
 import { api } from './services/api.js'
 import ConfigScreen from './screens/ConfigScreen.jsx'
 import EnviosScreen from './screens/EnviosScreen.jsx'
+import VuelosScreen from './screens/VuelosScreen.jsx'
 import DashboardScreen from './screens/DashboardScreen.jsx'
 import ResultadosScreen from './screens/ResultadosScreen.jsx'
 import DrawerAeropuerto from './drawers/DrawerAeropuerto.jsx'
@@ -444,28 +445,8 @@ export default function App() {
       stopPolling()
     }
     onReset()
-
-    // Re-run automatically with the same files+params if we have them
-    if (lastSimConfig) {
-      try {
-        const state = await api.startSimulation(lastSimConfig.params, lastSimConfig.files)
-        setUseBackend(true)
-        setBackendState(state)
-        setSimClockMinutes(0)
-        setScreen('main')
-        startPolling()
-      } catch (err) {
-        console.error('Reset re-start error:', err)
-        // Fall back to config screen if re-start fails
-        setUseBackend(false)
-        setBackendState(null)
-        setScreen('config')
-        setConfigOpen(true)
-      }
-    } else {
-      setUseBackend(false)
-      setBackendState(null)
-    }
+    setUseBackend(false)
+    setBackendState(null)
   }
 
   return (
@@ -499,56 +480,78 @@ export default function App() {
       />
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
         {/* ── OPERACIONES (main map view) ─────────────────────────────── */}
+        {/* ── OPERACIONES (main map view) ─────────────────────────────── */}
         {(screen === 'main' && !configOpen) && (
-          <div style={{ display: 'grid', gridTemplateColumns: `${leftOpen ? '188px' : '0px'} 1fr ${rightOpen ? '240px' : '0px'}`, height: '100%', overflow: 'hidden', transition: 'grid-template-columns 0.2s ease' }}>
-            <div style={{ overflow: 'hidden', height: '100%' }}>
+          <div style={{
+            display: 'grid',
+            gridTemplateColumns: `${leftOpen ? '220px' : '0px'} 1fr ${rightOpen ? '300px' : '0px'}`,
+            height: '100%',
+            overflow: 'hidden',
+            transition: 'grid-template-columns 0.4s cubic-bezier(0.4, 0, 0.2, 1)'
+          }}>
+            {/* Left Panel Container */}
+            <div style={{ overflow: 'hidden', borderRight: leftOpen ? '1px solid var(--border)' : 'none', background: 'var(--panel)' }}>
               <LeftPanel filters={filters} setFilters={setFilters} threshold={threshold} setThreshold={setThreshold} />
             </div>
-            <div style={{ height: '100%', overflow: 'hidden', position: 'relative' }}>
+
+            {/* Center Map Container */}
+            <div style={{ position: 'relative', height: '100%', overflow: 'hidden' }}>
+              {/* Floating Toggle Buttons */}
               <button
-                onClick={() => setLeftOpen((v) => !v)}
-                title={leftOpen ? 'Ocultar panel izquierdo' : 'Mostrar panel izquierdo'}
+                onClick={() => setLeftOpen(!leftOpen)}
                 style={{
                   position: 'absolute', left: 0, top: '50%', transform: 'translateY(-50%)',
-                  zIndex: 1000, background: 'rgba(22,27,34,0.85)', border: '1px solid var(--border)',
-                  color: 'var(--muted)', cursor: 'pointer', borderRadius: '0 5px 5px 0',
-                  padding: '10px 5px', lineHeight: 1, fontSize: 13, backdropFilter: 'blur(6px)',
-                  userSelect: 'none',
+                  zIndex: 1000, width: 24, height: 48, background: 'rgba(13, 17, 23, 0.85)',
+                  border: '1px solid var(--border)', borderLeft: 'none', borderRadius: '0 8px 8px 0',
+                  color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
                 }}
               >
                 {leftOpen ? '‹' : '›'}
               </button>
+
+              <MapView
+                airports={normalizedAirports}
+                routes={useBackend ? backendRoutes : normalizedRoutes}
+                flights={useBackend ? backendFlights : normalizedFlights}
+                filters={filters}
+                threshold={threshold}
+                simHour={simHour}
+                simMin={simMin}
+                selectedRoute={selectedRoute}
+                setSelectedRoute={setSelectedRoute}
+                selectedFlight={selectedFlight}
+                setSelectedFlight={setSelectedFlight}
+                onFlightFromRoute={setMapSelectedVuelo}
+                onAirportClick={setMapSelectedAirport}
+                theme={theme}
+              />
+
               <button
-                onClick={() => setRightOpen((v) => !v)}
-                title={rightOpen ? 'Ocultar panel derecho' : 'Mostrar panel derecho'}
+                onClick={() => setRightOpen(!rightOpen)}
                 style={{
                   position: 'absolute', right: 0, top: '50%', transform: 'translateY(-50%)',
-                  zIndex: 1000, background: 'rgba(22,27,34,0.85)', border: '1px solid var(--border)',
-                  color: 'var(--muted)', cursor: 'pointer', borderRadius: '5px 0 0 5px',
-                  padding: '10px 5px', lineHeight: 1, fontSize: 13, backdropFilter: 'blur(6px)',
-                  userSelect: 'none',
+                  zIndex: 1000, width: 24, height: 48, background: 'rgba(13, 17, 23, 0.85)',
+                  border: '1px solid var(--border)', borderRight: 'none', borderRadius: '8px 0 0 8px',
+                  color: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center'
                 }}
               >
                 {rightOpen ? '›' : '‹'}
               </button>
-            <MapView
-              airports={normalizedAirports}
-              routes={useBackend ? backendRoutes : normalizedRoutes}
-              flights={useBackend ? backendFlights : normalizedFlights}
-              filters={filters}
-              threshold={threshold}
-              simHour={simHour}
-              simMin={simMin}
-              selectedRoute={selectedRoute}
-              setSelectedRoute={setSelectedRoute}
-              selectedFlight={selectedFlight}
-              setSelectedFlight={setSelectedFlight}
-              onFlightFromRoute={setMapSelectedVuelo}
-              onAirportClick={setMapSelectedAirport}
-              theme={theme}
-            />
+
+              {/* Detail Drawers */}
+              <DrawerAeropuerto
+                airport={mapSelectedAirport}
+                vuelos={useBackend ? (backendState?.vuelos || []) : (simState?.flights || [])}
+                onClose={() => setMapSelectedAirport(null)}
+              />
+              <DrawerVuelo
+                vuelo={mapSelectedVuelo}
+                onClose={() => setMapSelectedVuelo(null)}
+              />
             </div>
-            <div style={{ overflow: 'hidden', height: '100%' }}>
+
+            {/* Right Panel Container */}
+            <div style={{ overflow: 'hidden', borderLeft: rightOpen ? '1px solid var(--border)' : 'none', background: 'var(--panel)' }}>
               <RightPanel
                 flights={useBackend ? backendFlights : normalizedFlights}
                 airports={normalizedAirports}
@@ -558,15 +561,6 @@ export default function App() {
                 onVueloClick={setMapSelectedVuelo}
               />
             </div>
-            <DrawerAeropuerto
-              airport={mapSelectedAirport}
-              vuelos={useBackend ? (backendState?.vuelos || []) : (simState?.flights || [])}
-              onClose={() => setMapSelectedAirport(null)}
-            />
-            <DrawerVuelo
-              vuelo={mapSelectedVuelo}
-              onClose={() => setMapSelectedVuelo(null)}
-            />
           </div>
         )}
 

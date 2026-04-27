@@ -146,4 +146,12 @@ export const api = {
   getEnvioById: async (id) => withHandling('getEnvioById', async () => {
     return request(`/envios/${id}`)
   }),
+
+  cancelFlight: async (codigoVuelo) => withHandling('cancelFlight', async () => {
+    return request(`/simulation/cancel-flight/${codigoVuelo}`, { method: 'POST' })
+  }),
+
+  cancelEnvio: async (idEnvio) => withHandling('cancelEnvio', async () => {
+    return request(`/simulation/cancel-envio/${idEnvio}`, { method: 'POST' })
+  }),
 }
