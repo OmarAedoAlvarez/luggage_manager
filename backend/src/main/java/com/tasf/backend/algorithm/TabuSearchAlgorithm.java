@@ -25,6 +25,8 @@ import org.springframework.stereotype.Component;
 @Component("TABU_SEARCH")
 public class TabuSearchAlgorithm extends RoutePlannerSupport implements MetaheuristicAlgorithm {
     private static final Logger log = LoggerFactory.getLogger(TabuSearchAlgorithm.class);
+    private static final long MIN_TIME_BUDGET_MS = 5_000L;
+    private static final long MAX_TIME_BUDGET_MS = 60_000L;
     private MetricaAlgoritmo ultimaMetrica;
 
     @Override
@@ -78,8 +80,13 @@ public class TabuSearchAlgorithm extends RoutePlannerSupport implements Metaheur
             int maxIterations = Math.min(10000, 100 * Math.max(1, envios.size()));
             int noImprovement = 0;
             int noImprovementLimit = Math.max(100, envios.size() / 2);
+            long timeBudgetMs = Math.max(MIN_TIME_BUDGET_MS, Math.min(MAX_TIME_BUDGET_MS, envios.size() * 120L));
 
             for (int i = 0; i < maxIterations && noImprovement < noImprovementLimit; i++) {
+                if (System.currentTimeMillis() - start >= timeBudgetMs) {
+                    log.warn("Tabu search stopped by time budget ({} ms) after {} iterations", timeBudgetMs, i);
+                    break;
+                }
                 Neighbor bestNeighbor = null;
 
                 for (Envio envio : envios) {
