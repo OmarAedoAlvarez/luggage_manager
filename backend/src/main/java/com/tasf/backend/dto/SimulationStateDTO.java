@@ -5,6 +5,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import com.tasf.backend.domain.MetricaAlgoritmo;
 
 @Data
 @Builder
@@ -15,6 +16,7 @@ public class SimulationStateDTO {
     private int totalDias;
     private String fechaSimulada;
     private String algoritmo;
+    private MetricaAlgoritmo metrica;
     private boolean enEjecucion;
     private boolean finalizada;
     private List<AeropuertoDTO> aeropuertos;

@@ -13,6 +13,7 @@ import com.tasf.backend.service.DataLoaderService;
 import com.tasf.backend.simulation.SimulationEngine;
 import java.io.IOException;
 import java.time.LocalDate;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -66,9 +67,11 @@ public class SimulationController {
                 paramsJson != null ? paramsJson.length() : 0,
                 files != null ? files.length : 0);
             ParametrosSimulacion params = objectMapper.readValue(paramsJson, ParametrosSimulacion.class);
-            log.info("startSimulation params parsed: fechaInicio={}, diasSimulacion={}, algoritmo={}",
+            log.info("startSimulation params parsed: fechaInicio={}, dias={}, diasSimulacion={}, esColapso={}, algoritmo={}",
                 params.getFechaInicio(),
+                params.getDias(),
                 params.getDiasSimulacion(),
+                params.getEsColapso(),
                 params.getAlgoritmo());
             if (files == null || files.length == 0) {
                 throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "At least one baggage file is required");
@@ -78,9 +81,9 @@ public class SimulationController {
                 .collect(Collectors.toMap(Aeropuerto::getCodigoIATA, Aeropuerto::getContinente, (a, b) -> a));
 
             LocalDate dateFrom = params.getFechaInicio();
-            // dateTo is the last simulated day (inclusive). plusDays(n-1) because day 1 is
-            // fechaInicio itself, day 2 is +1, …, day n is +(n-1).
-            LocalDate dateTo = params.getFechaInicio().plusDays(params.getDiasSimulacion() - 1);
+            int diasSolicitados = resolveDiasSolicitados(params);
+            boolean esColapso = Boolean.TRUE.equals(params.getEsColapso());
+            LocalDate dateTo = esColapso ? null : params.getFechaInicio().plusDays(diasSolicitados - 1);
             List<Envio> envios = new ArrayList<>();
 
             for (MultipartFile file : files) {
@@ -92,7 +95,13 @@ public class SimulationController {
                 envios.addAll(baggageParser.parseEnvios(file.getInputStream(), origin, dateFrom, dateTo, continentByAirport));
             }
 
-            log.info("startSimulation envios loaded: count={}", envios.size());
+            int diasSimulacionResueltos = esColapso
+                ? resolveDiasColapso(dateFrom, envios)
+                : diasSolicitados;
+            params.setDias(diasSolicitados);
+            params.setDiasSimulacion(diasSimulacionResueltos);
+
+            log.info("startSimulation envios loaded: count={}, diasSimulacionResueltos={}", envios.size(), diasSimulacionResueltos);
             simulationEngine.inicializar(params, envios);
             log.info("startSimulation initialized successfully");
             return ResponseEntity.ok(simulationEngine.getEstado());
@@ -122,6 +131,18 @@ public class SimulationController {
     public ResponseEntity<Void> reset() {
         simulationEngine.reset();
         return ResponseEntity.ok().build();
+    }
+
+    @PostMapping("/simulation/cancel-flight/{codigoVuelo}")
+    public ResponseEntity<SimulationStateDTO> cancelFlight(@PathVariable String codigoVuelo) {
+        simulationEngine.cancelarVueloManualmente(codigoVuelo);
+        return ResponseEntity.ok(simulationEngine.getEstado());
+    }
+
+    @PostMapping("/simulation/cancel-envio/{idEnvio}")
+    public ResponseEntity<SimulationStateDTO> cancelEnvio(@PathVariable String idEnvio) {
+        simulationEngine.cancelarEnvioManualmente(idEnvio);
+        return ResponseEntity.ok(simulationEngine.getEstado());
     }
 
     @GetMapping("/airports")
@@ -156,5 +177,24 @@ public class SimulationController {
                 "Filename must follow _envios_XXXX.txt pattern: " + filename);
         }
         return matcher.group(1).toUpperCase();
+    }
+
+    private int resolveDiasSolicitados(ParametrosSimulacion params) {
+        if (params.getDias() != null && params.getDias() > 0) {
+            return params.getDias();
+        }
+        if (params.getDiasSimulacion() > 0) {
+            return params.getDiasSimulacion();
+        }
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "dias must be greater than zero");
+    }
+
+    private int resolveDiasColapso(LocalDate dateFrom, List<Envio> envios) {
+        LocalDate lastDate = envios.stream()
+            .map(Envio::getFechaHoraIngreso)
+            .map(java.time.LocalDateTime::toLocalDate)
+            .max(LocalDate::compareTo)
+            .orElse(dateFrom);
+        return (int) Math.max(1, ChronoUnit.DAYS.between(dateFrom, lastDate) + 1);
     }
 }

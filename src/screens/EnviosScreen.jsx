@@ -1,13 +1,14 @@
 import React, { useMemo, useState } from 'react'
 import DrawerEnvio from '../drawers/DrawerEnvio.jsx'
 
-const STATUS_ORDER = ['EN_TRANSITO', 'ENTREGADO', 'RETRASADO', 'PLANIFICADO', 'PENDIENTE']
+const STATUS_ORDER = ['EN_TRANSITO', 'ENTREGADO', 'RETRASADO', 'PLANIFICADO', 'PENDIENTE', 'CANCELADO']
 const STATUS_COLOR = {
   EN_TRANSITO: 'var(--blue)',
   ENTREGADO: 'var(--green)',
   RETRASADO: 'var(--red)',
   PLANIFICADO: 'var(--amber)',
   PENDIENTE: 'var(--muted)',
+  CANCELADO: 'var(--red)',
 }
 
 const ROUTE_TYPES = ['continental', 'intercontinental']

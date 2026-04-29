@@ -5,5 +5,6 @@ public enum EstadoEnvio {
     PLANIFICADO,
     EN_TRANSITO,
     ENTREGADO,
-    RETRASADO
+    RETRASADO,
+    CANCELADO
 }

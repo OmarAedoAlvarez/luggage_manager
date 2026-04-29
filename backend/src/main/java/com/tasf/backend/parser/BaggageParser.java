@@ -31,6 +31,8 @@ public class BaggageParser {
         Map<String, String> continentByAirport
     ) {
         List<Envio> envios = new ArrayList<>();
+        int parsed = 0;
+        int skipped = 0;
 
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
             String line;
@@ -44,13 +46,17 @@ public class BaggageParser {
                 Envio envio = parseLine(line.trim(), originAirport, dateFrom, dateTo, continentByAirport);
                 if (envio != null) {
                     envios.add(envio);
+                    parsed++;
                 } else if (!line.isBlank()) {
                     log.warn("Skipping malformed or out-of-range baggage line {}: {}", lineNumber, line);
+                    skipped++;
                 }
             }
         } catch (IOException ex) {
             log.error("Error reading baggage data", ex);
         }
+
+        log.info("Loaded {} envios from baggage file (skipped={})", parsed, skipped);
 
         return envios;
     }
@@ -69,7 +75,10 @@ public class BaggageParser {
 
         try {
             LocalDate date = LocalDate.parse(parts[1].trim(), DATE_FORMATTER);
-            if (date.isBefore(dateFrom) || date.isAfter(dateTo)) {
+            if (date.isBefore(dateFrom)) {
+                return null;
+            }
+            if (dateTo != null && date.isAfter(dateTo)) {
                 return null;
             }
 
