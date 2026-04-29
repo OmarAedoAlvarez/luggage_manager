@@ -54,7 +54,7 @@ public class PlanningService {
         ParametrosSimulacion params,
         boolean conIncidencia
     ) {
-        MetaheuristicAlgorithm selected = selectAlgorithm(envios.size(), conIncidencia);
+        MetaheuristicAlgorithm selected = selectAlgorithm(params, conIncidencia);
         log.info("Planning {} envios with {} (incidencia={})", envios.size(), selected.getNombre(), conIncidencia);
         List<PlanDeViaje> planes = selected.planificar(envios, vuelos, aeropuertos, params);
         Set<String> enviosConPlan = planes.stream().map(PlanDeViaje::getIdEnvio).collect(Collectors.toSet());
@@ -70,13 +70,32 @@ public class PlanningService {
             .build();
     }
 
-    private MetaheuristicAlgorithm selectAlgorithm(int enviosCount, boolean conIncidencia) {
-        // Default to Simulated Annealing. Use Tabu Search for incidents/re-planning.
-        String selectedName = conIncidencia ? TS : SA;
+    private MetaheuristicAlgorithm selectAlgorithm(ParametrosSimulacion params, boolean conIncidencia) {
+        // For normal planning, honor the requested algorithm so the same dataset can
+        // be executed separately with SA or TS. Incidence replanning keeps TS.
+        String requested = conIncidencia ? TS : normalizeAlgorithm(params != null ? params.getAlgoritmo() : null);
+        String selectedName = requested != null ? requested : SA;
         MetaheuristicAlgorithm selected = algorithms.get(selectedName);
         if (selected == null) {
             throw new IllegalStateException("Algorithm not configured: " + selectedName);
         }
         return selected;
+    }
+
+    private String normalizeAlgorithm(String algorithm) {
+        if (algorithm == null) {
+            return null;
+        }
+        String normalized = algorithm.trim().toUpperCase();
+        if (normalized.isEmpty()) {
+            return null;
+        }
+        if ("SA".equals(normalized)) {
+            return SA;
+        }
+        if ("TS".equals(normalized)) {
+            return TS;
+        }
+        return normalized;
     }
 }
