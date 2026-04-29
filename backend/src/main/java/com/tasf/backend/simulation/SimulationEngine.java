@@ -24,6 +24,7 @@ import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.LocalTime;
+import java.time.temporal.ChronoUnit;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -176,6 +177,14 @@ public class SimulationEngine {
             .slaBreach(deliveryStats.slaBreach)
             .build());
 
+        boolean esColapso = Boolean.TRUE.equals(params.getEsColapso());
+        if (esColapso && shouldFinishCollapseNow()) {
+            this.finalizada = true;
+            this.enEjecucion = false;
+            addOperationLog("Simulation completed (COLAPSO) - no pending operational work remaining - Day " + diaActual);
+            return getEstado();
+        }
+
         if (diaActual >= params.getDiasSimulacion()) {
             this.finalizada = true;
             this.enEjecucion = false;
@@ -241,11 +250,75 @@ public class SimulationEngine {
             return getEstado();
         }
 
-        // Advance AFTER processing current day so day-1 departures are not skipped
-        diaActual++;
-        this.fechaSimulada = this.fechaSimulada.plusDays(1);
+        // Advance AFTER processing current day so day-1 departures are not skipped.
+        // In collapse mode, skip idle days and jump directly to the next day with work.
+        int daysToAdvance = esColapso ? computeCollapseAdvanceDays() : 1;
+        if (daysToAdvance < 1) {
+            daysToAdvance = 1;
+        }
+        diaActual = Math.min(params.getDiasSimulacion(), diaActual + daysToAdvance);
+        this.fechaSimulada = this.fechaSimulada.plusDays(daysToAdvance);
 
         return getEstado();
+    }
+
+    private boolean shouldFinishCollapseNow() {
+        return envios.stream().allMatch(envio -> isTerminalEnvioState(envio.getEstado()));
+    }
+
+    private boolean isTerminalEnvioState(EstadoEnvio estado) {
+        return estado == EstadoEnvio.ENTREGADO
+            || estado == EstadoEnvio.RETRASADO
+            || estado == EstadoEnvio.CANCELADO;
+    }
+
+    private int computeCollapseAdvanceDays() {
+        if (fechaSimulada == null) {
+            return 1;
+        }
+
+        LocalDate today = fechaSimulada.toLocalDate();
+        Set<String> nonTerminalEnvioIds = envios.stream()
+            .filter(envio -> !isTerminalEnvioState(envio.getEstado()))
+            .map(Envio::getIdEnvio)
+            .collect(Collectors.toSet());
+
+        Optional<LocalDate> nextDepartureDate = planes.stream()
+            .filter(plan -> nonTerminalEnvioIds.contains(plan.getIdEnvio()))
+            .flatMap(plan -> plan.getEscalas().stream())
+            .map(Escala::getHoraSalidaEst)
+            .filter(date -> date != null)
+            .map(LocalDateTime::toLocalDate)
+            .filter(date -> date.isAfter(today))
+            .min(LocalDate::compareTo);
+
+        Optional<LocalDate> nextDeadlineDate = envios.stream()
+            .filter(envio -> !isTerminalEnvioState(envio.getEstado()))
+            .map(envio -> envio.getFechaHoraIngreso().plusDays(envio.getSla()).toLocalDate())
+            .filter(date -> date.isAfter(today))
+            .min(LocalDate::compareTo);
+
+        LocalDate nextWorkDate;
+        if (nextDepartureDate.isPresent() && nextDeadlineDate.isPresent()) {
+            nextWorkDate = nextDepartureDate.get().isBefore(nextDeadlineDate.get())
+                ? nextDepartureDate.get()
+                : nextDeadlineDate.get();
+        } else if (nextDepartureDate.isPresent()) {
+            nextWorkDate = nextDepartureDate.get();
+        } else if (nextDeadlineDate.isPresent()) {
+            nextWorkDate = nextDeadlineDate.get();
+        } else {
+            return 1;
+        }
+
+        long gap = ChronoUnit.DAYS.between(today, nextWorkDate);
+        if (gap <= 1) {
+            return 1;
+        }
+
+        int cappedGap = (int) Math.min(Integer.MAX_VALUE, gap);
+        addOperationLog("[COLAPSO] Skipping " + (cappedGap - 1) + " idle days until " + nextWorkDate);
+        return cappedGap;
     }
 
     public synchronized void replanificar(List<Maleta> affectedMaletas) {
@@ -957,9 +1030,9 @@ public class SimulationEngine {
         if (vuelo.isCancelado()) {
             return "cancelado";
         }
-        if (inUse && vuelo.getCargaActual() == 0 && diaActual > 1) {
-            return "completado";
-        }
+        // A flight is only marked "completado" if it has no pending plans for TODAY.
+        // Daily repeating flights should remain "activo" as long as they have schedules.
+        // Checking only on day > 1 was incorrect; flights need to be "activo" throughout.
         return "activo";
     }
 

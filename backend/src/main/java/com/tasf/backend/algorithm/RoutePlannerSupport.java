@@ -18,6 +18,10 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 
 abstract class RoutePlannerSupport {
+    private static final int MAX_CANDIDATE_ROUTES_PER_ENVIO = 24;
+    private static final int MAX_DIRECT_CANDIDATES_PER_ENVIO = 8;
+    private static final int MAX_FIRST_LEGS_PER_ENVIO = 12;
+    private static final int MAX_SECOND_LEGS_PER_FIRST = 3;
 
     protected Map<String, List<RouteCandidate>> buildCandidatePool(
         List<Envio> envios,
@@ -64,36 +68,95 @@ abstract class RoutePlannerSupport {
         Map<String, Aeropuerto> airportByCode,
         ParametrosSimulacion params
     ) {
-        List<RouteCandidate> routes = new ArrayList<>();
+        List<RouteCandidate> routes = new ArrayList<>(MAX_CANDIDATE_ROUTES_PER_ENVIO);
         LocalDateTime deadline = envio.getFechaHoraIngreso().plusDays(envio.getSla());
 
-        List<Vuelo> directFlights = flightsByOrigin.getOrDefault(envio.getAeropuertoOrigen(), List.of())
-            .stream()
-            .filter(f -> f.getDestino().equals(envio.getAeropuertoDestino()))
+        List<Vuelo> originFlights = flightsByOrigin.getOrDefault(envio.getAeropuertoOrigen(), List.of());
+
+        List<Vuelo> directFlights = originFlights.stream()
+            .filter(flight -> flight.getDestino().equals(envio.getAeropuertoDestino()))
+            .sorted(Comparator.comparing(Vuelo::getHoraSalida).thenComparing(Vuelo::getHoraLlegada))
+            .limit(MAX_DIRECT_CANDIDATES_PER_ENVIO)
             .toList();
 
-        routes.addAll(directFlights.stream()
-            .map(flight -> buildDirectCandidate(envio, flight))
-            .flatMap(Optional::stream)
-            .filter(route -> isWithinSla(route, deadline, params))
-            .toList());
+        for (Vuelo flight : directFlights) {
+            if (!flight.getDestino().equals(envio.getAeropuertoDestino())) {
+                continue;
+            }
+            Optional<RouteCandidate> candidate = buildDirectCandidate(envio, flight);
+            if (candidate.isPresent()) {
+                RouteCandidate route = candidate.get();
+                if (isWithinSla(route, deadline, params)) {
+                    routes.add(route);
+                    if (routes.size() >= MAX_CANDIDATE_ROUTES_PER_ENVIO) {
+                        return routes.stream()
+                            .sorted(Comparator.comparing(RouteCandidate::getFinalArrival))
+                            .toList();
+                    }
+                }
+            }
+        }
 
-        List<Vuelo> firstLegs = flightsByOrigin.getOrDefault(envio.getAeropuertoOrigen(), List.of())
-            .stream()
-            .filter(flight -> !flight.getDestino().equals(envio.getAeropuertoDestino()))
+        List<Vuelo> firstLegs = originFlights.stream()
+            .filter(first -> !first.getDestino().equals(envio.getAeropuertoDestino()))
+            .sorted(Comparator.comparing(Vuelo::getHoraSalida).thenComparing(Vuelo::getHoraLlegada))
+            .limit(MAX_FIRST_LEGS_PER_ENVIO)
             .toList();
 
-        routes.addAll(firstLegs.stream()
-            .flatMap(first -> flightsByOrigin.getOrDefault(first.getDestino(), List.of()).stream()
-                .filter(second -> second.getDestino().equals(envio.getAeropuertoDestino()))
-                .map(second -> buildOneStopCandidate(envio, first, second, params)))
-            .flatMap(Optional::stream)
-            .filter(route -> isWithinSla(route, deadline, params))
-            .toList());
+        for (Vuelo first : firstLegs) {
+            if (first.getDestino().equals(envio.getAeropuertoDestino())) {
+                continue;
+            }
+
+            LocalDateTime firstDeparture = nextDateTimeForFlight(envio.getFechaHoraIngreso(), first.getHoraSalida());
+            LocalDateTime firstArrival = arrivalDateTime(firstDeparture, first.getHoraSalida(), first.getHoraLlegada());
+            LocalDateTime secondEarliest = firstArrival.plusMinutes(params.getMinutosEscalaMinima());
+
+            List<Vuelo> secondLegs = selectBestSecondLegs(
+                flightsByOrigin.getOrDefault(first.getDestino(), List.of()),
+                secondEarliest,
+                MAX_SECOND_LEGS_PER_FIRST
+            );
+
+            for (Vuelo second : secondLegs) {
+                if (!second.getDestino().equals(envio.getAeropuertoDestino())) {
+                    continue;
+                }
+
+                Optional<RouteCandidate> candidate = buildOneStopCandidate(envio, first, second, params);
+                if (candidate.isEmpty()) {
+                    continue;
+                }
+
+                RouteCandidate route = candidate.get();
+                if (!isWithinSla(route, deadline, params)) {
+                    continue;
+                }
+
+                routes.add(route);
+                if (routes.size() >= MAX_CANDIDATE_ROUTES_PER_ENVIO) {
+                    return routes.stream()
+                        .sorted(Comparator.comparing(RouteCandidate::getFinalArrival))
+                        .toList();
+                }
+            }
+        }
 
         return routes.stream()
             .sorted(Comparator.comparing(RouteCandidate::getFinalArrival))
-            .limit(50)
+            .toList();
+    }
+
+    private List<Vuelo> selectBestSecondLegs(
+        List<Vuelo> candidateSecondLegs,
+        LocalDateTime secondEarliest,
+        int limit
+    ) {
+        return candidateSecondLegs.stream()
+            .sorted(Comparator
+                .comparing((Vuelo v) -> nextDateTimeForFlight(secondEarliest, v.getHoraSalida()))
+                .thenComparing(Vuelo::getHoraLlegada))
+            .limit(limit)
             .toList();
     }
 

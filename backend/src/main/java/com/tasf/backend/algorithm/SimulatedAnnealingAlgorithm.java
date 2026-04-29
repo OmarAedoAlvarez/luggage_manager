@@ -21,6 +21,9 @@ import org.springframework.stereotype.Component;
 @Component("SIMULATED_ANNEALING")
 public class SimulatedAnnealingAlgorithm extends RoutePlannerSupport implements MetaheuristicAlgorithm {
     private static final Logger log = LoggerFactory.getLogger(SimulatedAnnealingAlgorithm.class);
+    private static final int MAX_UNROUTABLE_SAMPLES = 20;
+    private static final long MIN_TIME_BUDGET_MS = 5_000L;
+    private static final long MAX_TIME_BUDGET_MS = 45_000L;
     private final Random random = new Random();
     private MetricaAlgoritmo ultimaMetrica;
 
@@ -41,11 +44,17 @@ public class SimulatedAnnealingAlgorithm extends RoutePlannerSupport implements 
 
             final Map<String, RouteCandidate> current = new HashMap<>();
             List<String> optimizableEnvios = new ArrayList<>();
+            int noRouteByPool = 0;
+            int noRouteByConstraints = 0;
+            List<String> unroutableSamples = new ArrayList<>();
             for (Envio envio : envios) {
                 List<RouteCandidate> options = pool.getOrDefault(envio.getIdEnvio(), List.of());
                 if (options.isEmpty()) {
                     envio.setEstado(EstadoEnvio.RETRASADO);
-                    log.warn("Envio {} has no feasible routes; marked RETRASADO", envio.getIdEnvio());
+                    noRouteByPool++;
+                    if (unroutableSamples.size() < MAX_UNROUTABLE_SAMPLES) {
+                        unroutableSamples.add(envio.getIdEnvio());
+                    }
                     continue;
                 }
                 Optional<RouteCandidate> feasible = options.stream()
@@ -57,8 +66,22 @@ public class SimulatedAnnealingAlgorithm extends RoutePlannerSupport implements 
                     optimizableEnvios.add(envio.getIdEnvio());
                 } else {
                     envio.setEstado(EstadoEnvio.RETRASADO);
-                    log.warn("No feasible initial route for envio {}", envio.getIdEnvio());
+                    noRouteByConstraints++;
+                    if (unroutableSamples.size() < MAX_UNROUTABLE_SAMPLES) {
+                        unroutableSamples.add(envio.getIdEnvio());
+                    }
                 }
+            }
+
+            if (noRouteByPool > 0 || noRouteByConstraints > 0) {
+                log.warn(
+                    "Initial routing summary: total={}, assigned={}, noRouteByPool={}, noRouteByConstraints={}, sampleEnvios={}",
+                    envios.size(),
+                    optimizableEnvios.size(),
+                    noRouteByPool,
+                    noRouteByConstraints,
+                    unroutableSamples
+                );
             }
 
             if (current.isEmpty()) {
@@ -69,13 +92,18 @@ public class SimulatedAnnealingAlgorithm extends RoutePlannerSupport implements 
             double temperature = 1000.0d;
             final double coolingRate = 0.995d;
             final double minTemperature = 0.1d;
-            final int maxIterations = Math.min(50000, 500 * Math.max(1, envios.size()));
+            final int maxIterations = resolveMaxIterations(envios.size());
+            final long timeBudgetMs = resolveTimeBudgetMs(envios.size());
 
             Map<String, RouteCandidate> best = new HashMap<>(current);
             double currentCost = objective(current, envioById, params);
             double bestCost = currentCost;
 
             for (int i = 0; i < maxIterations && temperature >= minTemperature; i++) {
+                if (System.currentTimeMillis() - start >= timeBudgetMs) {
+                    log.warn("Simulated annealing stopped by time budget ({} ms) after {} iterations", timeBudgetMs, i);
+                    break;
+                }
                 if (optimizableEnvios.isEmpty()) {
                     break;
                 }
@@ -167,5 +195,23 @@ public class SimulatedAnnealingAlgorithm extends RoutePlannerSupport implements 
             .rutasEvaluadas(Math.max(0, routesEvaluated))
             .fechaEjecucion(LocalDateTime.now())
             .build();
+    }
+
+    private int resolveMaxIterations(int envioCount) {
+        if (envioCount >= 25_000) {
+            return 300;
+        }
+        if (envioCount >= 10_000) {
+            return 600;
+        }
+        if (envioCount >= 5_000) {
+            return 1_200;
+        }
+        return Math.min(8_000, Math.max(600, 4 * Math.max(1, envioCount)));
+    }
+
+    private long resolveTimeBudgetMs(int envioCount) {
+        long dynamicBudget = envioCount * 2L;
+        return Math.max(MIN_TIME_BUDGET_MS, Math.min(MAX_TIME_BUDGET_MS, dynamicBudget));
     }
 }

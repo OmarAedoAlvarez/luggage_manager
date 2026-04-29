@@ -184,9 +184,11 @@ export default function App() {
     if (useBackend && backendState?.enEjecucion && !backendState?.finalizada) {
       setAutoStep(true)
     }
-    if (backendState?.finalizada) {
+    // Stop autoStep immediately if simulation is no longer running
+    if (backendState && (backendState.finalizada || !backendState.enEjecucion)) {
       setAutoStep(false)
       stopAutoStep()
+      stopPolling()
     }
   }, [backendState?.enEjecucion, backendState?.finalizada])
 
@@ -222,9 +224,17 @@ export default function App() {
             stopPolling()
             setScreen('resultados')
           }
+        } else {
+          // If no state returned, stop the simulation
+          console.error('stepSimulation returned empty state')
+          setAutoStep(false)
+          clearInterval(autoStepRef.current)
         }
       } catch (err) {
         console.error('Auto-step error:', err)
+        // Stop on error to prevent infinite attempts
+        setAutoStep(false)
+        clearInterval(autoStepRef.current)
       }
     })()
 
@@ -340,20 +350,57 @@ export default function App() {
     }))
     : (simState?.routes || [])
 
+  function parsePlanResumenToLegs(planResumen) {
+    if (!planResumen || typeof planResumen !== 'string') return []
+
+    // Format 1: "AAA -> BBB | BBB -> CCC"
+    if (planResumen.includes('|')) {
+      return planResumen
+        .split('|')
+        .map((leg) => leg.trim())
+        .filter(Boolean)
+        .map((leg) => {
+          const [origin, destination] = leg.split('->')
+          return { origin: origin?.trim(), destination: destination?.trim() }
+        })
+        .filter((l) => l.origin && l.destination)
+    }
+
+    // Format 2: "AAA -> BBB via CCC, DDD"
+    const viaIdx = planResumen.toLowerCase().indexOf(' via ')
+    if (viaIdx >= 0) {
+      const head = planResumen.slice(0, viaIdx).trim()
+      const viaPart = planResumen.slice(viaIdx + 5).trim()
+      const [origin, destination] = head.split('->').map((s) => s?.trim())
+      const hubs = viaPart
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+
+      if (!origin || !destination || hubs.length === 0) return []
+
+      const chain = [origin, ...hubs, destination]
+      const legs = []
+      for (let i = 0; i < chain.length - 1; i++) {
+        legs.push({ origin: chain[i], destination: chain[i + 1] })
+      }
+      return legs
+    }
+
+    // Format 3: "AAA -> BBB"
+    const [origin, destination] = planResumen.split('->').map((s) => s?.trim())
+    if (origin && destination) {
+      return [{ origin, destination }]
+    }
+    return []
+  }
+
   const backendRoutes = useMemo(() => {
     if (!useBackend || !backendState?.envios) return []
     return backendState.envios
       .filter((e) => e.planResumen)
       .map((e) => {
-        const legs = (e.planResumen || '')
-          .split('|')
-          .map((leg) => leg.trim())
-          .filter(Boolean)
-          .map((leg) => {
-            const [origin, destination] = leg.split('->')
-            return { origin: origin?.trim(), destination: destination?.trim() }
-          })
-          .filter((l) => l.origin && l.destination)
+        const legs = parsePlanResumenToLegs(e.planResumen)
 
         const status =
           e.estado === 'ENTREGADO' ? 'green' :

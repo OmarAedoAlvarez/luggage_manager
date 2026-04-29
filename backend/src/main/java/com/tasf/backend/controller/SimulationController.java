@@ -180,13 +180,20 @@ public class SimulationController {
     }
 
     private int resolveDiasSolicitados(ParametrosSimulacion params) {
+        // For collapse mode (esColapso=true), dias can be 0 and will be calculated automatically
+        boolean esColapso = Boolean.TRUE.equals(params.getEsColapso());
+        
         if (params.getDias() != null && params.getDias() > 0) {
             return params.getDias();
+        }
+        if (esColapso) {
+            // For collapse mode, dias=0 is valid and expected
+            return 0;
         }
         if (params.getDiasSimulacion() > 0) {
             return params.getDiasSimulacion();
         }
-        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "dias must be greater than zero");
+        throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "dias must be greater than zero for non-collapse simulations");
     }
 
     private int resolveDiasColapso(LocalDate dateFrom, List<Envio> envios) {

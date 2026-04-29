@@ -1,6 +1,7 @@
 package com.tasf.backend.simulation;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -71,6 +72,25 @@ class SimulationScenarioTest {
         simulationEngine.inicializar(params, sampleEnvios);
         
         assertTrue(simulationEngine.estaInicializada());
+        assertEquals(10, simulationEngine.getEstado().getTotalDias());
+    }
+
+    @Test
+    void escenarioColapsoConMuchosEnviosNoRevientaMemoria() {
+        ParametrosSimulacion params = ParametrosSimulacion.builder()
+            .fechaInicio(LocalDate.of(2026, 1, 2))
+            .esColapso(true)
+            .diasSimulacion(10)
+            .capacidadAlmacen(800)
+            .capacidadVuelo(300)
+            .minutosEscalaMinima(10)
+            .minutosRecogidaDestino(10)
+            .build();
+
+        List<Envio> manyEnvios = createSampleEnvios(250);
+
+        assertDoesNotThrow(() -> simulationEngine.inicializar(params, manyEnvios));
+        assertNotNull(simulationEngine.getEstado());
         assertEquals(10, simulationEngine.getEstado().getTotalDias());
     }
 
