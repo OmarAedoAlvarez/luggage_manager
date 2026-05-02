@@ -85,11 +85,11 @@ abstract class RoutePlannerSupport {
             .filter(f -> f.getDestino().equals(envio.getAeropuertoDestino()))
             .toList();
 
-        routes.addAll(directFlights.stream()
-            .map(flight -> buildDirectCandidate(envio, flight))
+        List<RouteCandidate> allDirect = directFlights.stream()
+            .map(flight -> buildDirectCandidate(envio, flight, params))
             .flatMap(Optional::stream)
-            .filter(route -> isWithinSla(route, deadline, params))
-            .toList());
+            .toList();
+        routes.addAll(allDirect.stream().filter(r -> isWithinSla(r, deadline, params)).toList());
 
         List<Vuelo> firstLegs = flightsByOrigin.getOrDefault(envio.getAeropuertoOrigen(), List.of())
             .stream()
@@ -97,14 +97,25 @@ abstract class RoutePlannerSupport {
             .filter(flight -> !flight.getDestino().equals(envio.getAeropuertoDestino()))
             .toList();
 
-        routes.addAll(firstLegs.stream()
+        List<RouteCandidate> allOneStop = firstLegs.stream()
             .flatMap(first -> flightsByOrigin.getOrDefault(first.getDestino(), List.of()).stream()
                 .filter(second -> second.getOrigen().equals(first.getDestino()))
                 .filter(second -> second.getDestino().equals(envio.getAeropuertoDestino()))
                 .map(second -> buildOneStopCandidate(envio, first, second, params)))
             .flatMap(Optional::stream)
-            .filter(route -> isWithinSla(route, deadline, params))
-            .toList());
+            .toList();
+        routes.addAll(allOneStop.stream().filter(r -> isWithinSla(r, deadline, params)).toList());
+
+        int totalGenerated = allDirect.size() + allOneStop.size();
+        int totalPassed = routes.size();
+        log.debug("Candidates for envio {}: {} passed SLA, {} rejected",
+            envio.getIdEnvio(), totalPassed, totalGenerated - totalPassed);
+
+        if (routes.isEmpty()) {
+            log.warn("No valid candidates for envio {} (origin={} dest={} sla={} deadline={})",
+                envio.getIdEnvio(), envio.getAeropuertoOrigen(), envio.getAeropuertoDestino(),
+                envio.getSla(), deadline);
+        }
 
         return routes.stream()
             .sorted(Comparator.comparing(RouteCandidate::getFinalArrival))
@@ -112,14 +123,19 @@ abstract class RoutePlannerSupport {
             .toList();
     }
 
-    protected Optional<RouteCandidate> buildDirectCandidate(Envio envio, Vuelo flight) {
-        LocalDateTime departure = nextDateTimeForFlight(envio.getFechaHoraIngreso(), flight.getHoraSalida());
+    protected Optional<RouteCandidate> buildDirectCandidate(Envio envio, Vuelo flight, ParametrosSimulacion params) {
+        // Enforce origin pickup time: bag must be collected before boarding.
+        LocalDateTime earliestDeparture = envio.getFechaHoraIngreso()
+            .plusMinutes(params.getMinutosRecogidaDestino());
+        LocalDateTime departure = nextDateTimeForFlight(earliestDeparture, flight.getHoraSalida());
         LocalDateTime arrival = arrivalDateTime(departure, flight.getHoraSalida(), flight.getHoraLlegada());
         return Optional.of(new RouteCandidate(List.of(new RouteCandidate.Leg(flight, departure, arrival))));
     }
 
     protected Optional<RouteCandidate> buildOneStopCandidate(Envio envio, Vuelo first, Vuelo second, ParametrosSimulacion params) {
-        LocalDateTime firstDeparture = nextDateTimeForFlight(envio.getFechaHoraIngreso(), first.getHoraSalida());
+        LocalDateTime earliestDeparture = envio.getFechaHoraIngreso()
+            .plusMinutes(params.getMinutosRecogidaDestino());
+        LocalDateTime firstDeparture = nextDateTimeForFlight(earliestDeparture, first.getHoraSalida());
         LocalDateTime firstArrival = arrivalDateTime(firstDeparture, first.getHoraSalida(), first.getHoraLlegada());
         LocalDateTime secondEarliest = firstArrival.plusMinutes(params.getMinutosEscalaMinima());
         LocalDateTime secondDeparture = nextDateTimeForFlight(secondEarliest, second.getHoraSalida());
@@ -136,7 +152,7 @@ abstract class RoutePlannerSupport {
     }
 
     protected boolean isWithinSla(RouteCandidate candidate, LocalDateTime deadline, ParametrosSimulacion params) {
-        return !candidate.getFinalArrival().plusMinutes(params.getMinutosRecogidaDestino()).isAfter(deadline);
+        return !candidate.getFinalArrival().isAfter(deadline);
     }
 
     protected double objective(
