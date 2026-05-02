@@ -16,7 +16,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -81,16 +80,15 @@ public class TabuSearchAlgorithm extends RoutePlannerSupport implements Metaheur
                     log.warn("Envio {} has no feasible routes; marked RETRASADO", envio.getIdEnvio());
                     continue;
                 }
-                Optional<RouteCandidate> feasible = options.stream()
-                    .filter(option -> respectsHardConstraints(withCandidate(current, envio.getIdEnvio(), option), envioById, params))
-                    .findFirst();
-                if (feasible.isPresent()) {
-                    current.put(envio.getIdEnvio(), feasible.get());
-                    envio.setEstado(EstadoEnvio.PLANIFICADO);
-                } else {
-                    envio.setEstado(EstadoEnvio.RETRASADO);
-                    log.warn("No feasible initial route for envio {}", envio.getIdEnvio());
-                }
+                // Baseline assignment: take the first (earliest-arrival) candidate
+                // without checking hard capacity constraints.  A greedy constraint-
+                // checked seeding fills flight/warehouse capacity after ~64 envios and
+                // leaves the remaining 1431 as RETRASADO before TS even starts.
+                // Instead we seed everyone and let the TS refinement loop redistribute
+                // envios to routes that satisfy capacity (the overload penalty in
+                // objective() drives the search toward feasible assignments).
+                current.put(envio.getIdEnvio(), options.get(0));
+                envio.setEstado(EstadoEnvio.PLANIFICADO);
             }
 
             if (current.isEmpty()) {
