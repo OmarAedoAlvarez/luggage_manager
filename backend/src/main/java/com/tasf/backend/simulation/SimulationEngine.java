@@ -74,20 +74,48 @@ public class SimulationEngine {
         this.planningService = planningService;
     }
 
-    public synchronized void inicializar(ParametrosSimulacion params, List<Envio> enviosInput) {
+    public synchronized void inicializar(ParametrosSimulacion params, List<Envio> todosLosEnvios) {
         reset();
         this.params = params;
         this.aeropuertos = deepCopyAeropuertos(dataLoaderService.getAeropuertos());
-        if (params.getCapacidadAlmacen() > 0) {
-            this.aeropuertos.forEach(a -> a.setCapacidadAlmacen(params.getCapacidadAlmacen()));
-        }
-
         this.vuelos = deepCopyVuelos(dataLoaderService.getVuelos());
-        if (params.getCapacidadVuelo() > 0) {
-            this.vuelos.forEach(v -> v.setCapacidadTotal(params.getCapacidadVuelo()));
+
+        // Resolve the number of days requested by the user
+        int filterDias = resolveDias(params);
+
+        // Apply date-window filter: fecha >= fechaInicio AND fecha < fechaInicio + dias
+        // When esColapso=true there is no upper bound
+        LocalDate fechaInicio = params.getFechaInicio();
+        boolean esColapso = Boolean.TRUE.equals(params.getEsColapso());
+
+        List<Envio> filteredEnvios;
+        if (esColapso) {
+            filteredEnvios = todosLosEnvios.stream()
+                .filter(e -> !e.getFechaHoraIngreso().toLocalDate().isBefore(fechaInicio))
+                .collect(Collectors.toCollection(ArrayList::new));
+        } else {
+            LocalDate dateEnd = fechaInicio.plusDays(filterDias);
+            filteredEnvios = todosLosEnvios.stream()
+                .filter(e -> {
+                    LocalDate d = e.getFechaHoraIngreso().toLocalDate();
+                    return !d.isBefore(fechaInicio) && d.isBefore(dateEnd);
+                })
+                .collect(Collectors.toCollection(ArrayList::new));
         }
 
-        this.envios = deepCopyEnvios(enviosInput);
+        // Compute diasSimulacion: honour pre-set value (e.g. from tests), otherwise derive it
+        int diasSimulacion;
+        if (params.getDiasSimulacion() > 0) {
+            diasSimulacion = params.getDiasSimulacion();
+        } else if (esColapso) {
+            diasSimulacion = computeDiasColapso(fechaInicio, filteredEnvios);
+        } else {
+            diasSimulacion = filterDias;
+        }
+        params.setDias(filterDias);
+        params.setDiasSimulacion(diasSimulacion);
+
+        this.envios = deepCopyEnvios(filteredEnvios);
         this.maletas = generarMaletas(this.envios);
         this.planes = new ArrayList<>();
         this.cancelaciones = new ArrayList<>();
@@ -379,6 +407,10 @@ public class SimulationEngine {
 
     public synchronized boolean estaInicializada() {
         return params != null;
+    }
+
+    public synchronized ParametrosSimulacion getParams() {
+        return params;
     }
 
     public synchronized List<AeropuertoDTO> getAeropuertosEstado() {
@@ -1036,6 +1068,25 @@ public class SimulationEngine {
             }
         }
         return generated;
+    }
+
+    private int resolveDias(ParametrosSimulacion p) {
+        if (p.getDias() != null && p.getDias() > 0) {
+            return p.getDias();
+        }
+        if (p.getDiasSimulacion() > 0) {
+            return p.getDiasSimulacion();
+        }
+        throw new IllegalArgumentException("dias must be greater than zero");
+    }
+
+    private int computeDiasColapso(LocalDate fechaInicio, List<Envio> envios) {
+        LocalDate lastDate = envios.stream()
+            .map(Envio::getFechaHoraIngreso)
+            .map(LocalDateTime::toLocalDate)
+            .max(LocalDate::compareTo)
+            .orElse(fechaInicio);
+        return (int) Math.max(1, lastDate.toEpochDay() - fechaInicio.toEpochDay() + 1);
     }
 
     private static class DeliveryStats {

@@ -16,8 +16,16 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 abstract class RoutePlannerSupport {
+
+    private static final Logger log = LoggerFactory.getLogger(RoutePlannerSupport.class);
+
+    // Populated in buildCandidatePool so that objective/respectsHardConstraints
+    // can read domain-constant capacities without receiving aeropuertos explicitly.
+    private Map<String, Integer> airportCapacityCache = new HashMap<>();
 
     protected Map<String, List<RouteCandidate>> buildCandidatePool(
         List<Envio> envios,
@@ -28,6 +36,8 @@ abstract class RoutePlannerSupport {
     ) {
         Map<String, Aeropuerto> airportByCode = aeropuertos.stream()
             .collect(Collectors.toMap(Aeropuerto::getCodigoIATA, airport -> airport, (a, b) -> a));
+        this.airportCapacityCache = aeropuertos.stream()
+            .collect(Collectors.toMap(Aeropuerto::getCodigoIATA, Aeropuerto::getCapacidadAlmacen, (a, b) -> a));
         Map<String, List<Vuelo>> flightsByOrigin = vuelos.stream()
             .filter(vuelo -> !vuelo.isCancelado())
             .collect(Collectors.groupingBy(Vuelo::getOrigen));
@@ -38,6 +48,8 @@ abstract class RoutePlannerSupport {
             List<RouteCandidate> routes = generateRoutes(envio, flightsByOrigin, airportByCode, params);
             routeCounter.increment(routes.size());
             pool.put(envio.getIdEnvio(), routes);
+            log.info("Building candidates for envio {}: origin={} destination={} candidates={}",
+                envio.getIdEnvio(), envio.getAeropuertoOrigen(), envio.getAeropuertoDestino(), routes.size());
         }
 
         return pool;
@@ -69,6 +81,7 @@ abstract class RoutePlannerSupport {
 
         List<Vuelo> directFlights = flightsByOrigin.getOrDefault(envio.getAeropuertoOrigen(), List.of())
             .stream()
+            .filter(f -> f.getOrigen().equals(envio.getAeropuertoOrigen()))
             .filter(f -> f.getDestino().equals(envio.getAeropuertoDestino()))
             .toList();
 
@@ -80,11 +93,13 @@ abstract class RoutePlannerSupport {
 
         List<Vuelo> firstLegs = flightsByOrigin.getOrDefault(envio.getAeropuertoOrigen(), List.of())
             .stream()
+            .filter(flight -> flight.getOrigen().equals(envio.getAeropuertoOrigen()))
             .filter(flight -> !flight.getDestino().equals(envio.getAeropuertoDestino()))
             .toList();
 
         routes.addAll(firstLegs.stream()
             .flatMap(first -> flightsByOrigin.getOrDefault(first.getDestino(), List.of()).stream()
+                .filter(second -> second.getOrigen().equals(first.getDestino()))
                 .filter(second -> second.getDestino().equals(envio.getAeropuertoDestino()))
                 .map(second -> buildOneStopCandidate(envio, first, second, params)))
             .flatMap(Optional::stream)
@@ -145,9 +160,12 @@ abstract class RoutePlannerSupport {
             );
         });
 
-        double maxWarehouseAllowed = params.getCapacidadAlmacen() * 0.9d;
-        double overload = warehouseLoads.values().stream()
-            .mapToDouble(load -> Math.max(0, load - maxWarehouseAllowed))
+        int fallbackCapacity = airportCapacityCache.values().stream().mapToInt(v -> v).max().orElse(Integer.MAX_VALUE / 2);
+        double overload = warehouseLoads.entrySet().stream()
+            .mapToDouble(e -> {
+                double cap = airportCapacityCache.getOrDefault(e.getKey(), fallbackCapacity) * 0.9d;
+                return Math.max(0, e.getValue() - cap);
+            })
             .sum();
 
         return slaViolations + (overload * 10.0d);
@@ -166,16 +184,18 @@ abstract class RoutePlannerSupport {
             int quantity = envio.getCantidadMaletas();
 
             for (RouteCandidate.Leg leg : entry.getValue().getLegs()) {
-                int maxFlightCapacity = Math.min(leg.flight().getCapacidadTotal(), params.getCapacidadVuelo());
+                int maxFlightCapacity = leg.flight().getCapacidadTotal();
                 int projectedLoad = flightLoads.merge(leg.flight().getCodigoVuelo(), quantity, Integer::sum);
                 if (projectedLoad > maxFlightCapacity) {
                     return false;
                 }
             }
 
+            int fallback = airportCapacityCache.values().stream().mapToInt(v -> v).max().orElse(Integer.MAX_VALUE / 2);
             for (String hub : entry.getValue().getIntermediateAirports()) {
+                int hubCap = (int) Math.floor(airportCapacityCache.getOrDefault(hub, fallback) * 0.9d);
                 int projectedHubLoad = warehouseLoads.merge(hub, quantity, Integer::sum);
-                if (projectedHubLoad > (int) Math.floor(params.getCapacidadAlmacen() * 0.9d)) {
+                if (projectedHubLoad > hubCap) {
                     return false;
                 }
             }

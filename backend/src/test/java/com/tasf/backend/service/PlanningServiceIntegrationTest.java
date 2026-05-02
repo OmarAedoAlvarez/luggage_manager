@@ -111,7 +111,7 @@ class PlanningServiceIntegrationTest {
     }
 
     @Test
-    void planificaConIncidenciaUsaTabuSearch() {
+    void planificaConIncidenciaUsaAlgoritmoSeleccionado() {
         ParametrosSimulacion params = baseParams("SIMULATED_ANNEALING");
 
         PlanningResult result = planningService.planificarConIncidencia(
@@ -123,20 +123,18 @@ class PlanningServiceIntegrationTest {
 
         assertNotNull(result);
         assertNotNull(result.getMetrica());
-        assertEquals("TABU_SEARCH", result.getMetrica().getAlgoritmoUsado());
+        assertEquals("SIMULATED_ANNEALING", result.getMetrica().getAlgoritmoUsado());
         assertTrue(result.getMetrica().getTiempoEjecucionMs() > 0);
         assertTrue(result.getMetrica().getRutasEvaluadas() > 0);
         assertFalse(result.getPlanes().isEmpty());
-        assertTrue(result.getPlanes().stream().allMatch(plan -> "TABU_SEARCH".equals(plan.getAlgoritmoUsado())));
-        System.out.println("METRICA_SAMPLE_TS=" + result.getMetrica());
+        assertTrue(result.getPlanes().stream().allMatch(plan -> "SIMULATED_ANNEALING".equals(plan.getAlgoritmoUsado())));
+        System.out.println("METRICA_SAMPLE_INCIDENCIA=" + result.getMetrica());
     }
 
     private ParametrosSimulacion baseParams(String algorithm) {
         return ParametrosSimulacion.builder()
             .algoritmo(algorithm)
             .diasSimulacion(2)
-            .capacidadAlmacen(1000)
-            .capacidadVuelo(360)
             .fechaInicio(LocalDate.of(2026, 4, 10))
             .build();
     }

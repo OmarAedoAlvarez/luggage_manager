@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(del \"d:\\\\Personal\\\\REPOSTIORIES\\\\luggage_manager\\\\src\\\\screens\\\\VuelosScreen.jsx\")"
+    ]
+  }
+}

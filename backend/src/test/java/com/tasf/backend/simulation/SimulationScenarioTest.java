@@ -42,7 +42,6 @@ class SimulationScenarioTest {
             .dias(3)
             .diasSimulacion(3)
             .esColapso(false)
-            .capacidadAlmacen(800)
             .build();
 
         simulationEngine.inicializar(params, sampleEnvios);
@@ -65,7 +64,6 @@ class SimulationScenarioTest {
             .fechaInicio(LocalDate.of(2026, 1, 2))
             .esColapso(true)
             .diasSimulacion(10) // Expected simulation window resolved by controller
-            .capacidadAlmacen(800)
             .build();
 
         simulationEngine.inicializar(params, sampleEnvios);
@@ -80,7 +78,6 @@ class SimulationScenarioTest {
             .fechaInicio(LocalDate.of(2026, 1, 2))
             .diasSimulacion(5)
             .esColapso(false)
-            .capacidadAlmacen(800)
             .build();
 
         simulationEngine.inicializar(params, sampleEnvios);

@@ -1,4 +1,5 @@
-import React, { useMemo } from 'react'
+import React, { useMemo, useState } from 'react'
+import { registrarExperimento, exportarExperimentos } from '../services/api.js'
 
 const getEnvios = (s) =>
   s?.envios || s?.routes?.map((r) => ({
@@ -64,7 +65,7 @@ function csvDownload(state, rows) {
     ...lines.map((line) => line.map(escapeCsv).join(',')),
   ].join('\n')
 
-  const blob = new Blob([`\uFEFF${content}`], { type: 'text/csv;charset=utf-8;' })
+  const blob = new Blob([`﻿${content}`], { type: 'text/csv;charset=utf-8;' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
@@ -97,6 +98,10 @@ function semaforoColor(semaforo) {
 
 export default function ResultadosScreen({ simState }) {
   const isReady = simState?.finalizada === true
+  const [experSaved, setExperSaved] = useState(false)
+  const [experLoading, setExperLoading] = useState(false)
+  const [experError, setExperError] = useState(null)
+  const [exportLoading, setExportLoading] = useState(false)
 
   const airports = useMemo(() => getAeropuertos(simState).map((airport) => {
     if (airport.codigoIATA) return airport
@@ -175,6 +180,31 @@ export default function ResultadosScreen({ simState }) {
       intercontinental: intercontinental.length ? (intercontinentalOk / intercontinental.length) * 100 : 0,
     }
   }, [envios])
+
+  async function handleGuardarExperimento() {
+    setExperLoading(true)
+    setExperError(null)
+    try {
+      await registrarExperimento()
+      setExperSaved(true)
+    } catch (err) {
+      setExperError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setExperLoading(false)
+    }
+  }
+
+  async function handleDescargarExperimentos() {
+    setExportLoading(true)
+    setExperError(null)
+    try {
+      await exportarExperimentos()
+    } catch (err) {
+      setExperError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setExportLoading(false)
+    }
+  }
 
   const totalMaletas = envios.reduce((sum, e) => sum + Number(e.cantidadMaletas || 0), 0)
   const statusColor = kpis.cumplimiento >= 95 ? 'var(--green)' : 'var(--amber)'
@@ -327,6 +357,63 @@ export default function ResultadosScreen({ simState }) {
         >
           ↓ EXPORTAR REPORTE CSV
         </button>
+
+        <div style={{ marginTop: 20, borderTop: '1px solid var(--border)', paddingTop: 16 }}>
+          <div style={headingStyle()}>Experimentación numérica</div>
+          {experError && (
+            <div style={{ marginTop: 8, borderLeft: '2px solid var(--red)', background: 'rgba(248,81,73,0.06)', padding: '6px 10px', color: 'var(--red)', fontFamily: 'var(--mono)', fontSize: 11 }}>
+              {experError}
+            </div>
+          )}
+          <button
+            onClick={handleGuardarExperimento}
+            disabled={experSaved || experLoading}
+            style={{
+              marginTop: 10,
+              width: '100%',
+              background: experSaved ? 'rgba(34,208,122,0.08)' : 'transparent',
+              border: `1px solid ${experSaved ? 'var(--green)' : 'var(--border)'}`,
+              color: experSaved ? 'var(--green)' : 'var(--text)',
+              fontFamily: 'var(--mono)',
+              fontSize: 12,
+              padding: 10,
+              letterSpacing: 1,
+              cursor: experSaved || experLoading ? 'not-allowed' : 'pointer',
+              opacity: experSaved || experLoading ? 0.7 : 1,
+            }}
+          >
+            {experSaved ? '✓ EXPERIMENTO GUARDADO' : experLoading ? 'GUARDANDO...' : '↑ GUARDAR EXPERIMENTO'}
+          </button>
+          <button
+            onClick={handleDescargarExperimentos}
+            disabled={exportLoading}
+            style={{
+              marginTop: 8,
+              width: '100%',
+              background: 'transparent',
+              border: '1px solid var(--border)',
+              color: 'var(--text)',
+              fontFamily: 'var(--mono)',
+              fontSize: 12,
+              padding: 10,
+              letterSpacing: 1,
+              cursor: exportLoading ? 'not-allowed' : 'pointer',
+              opacity: exportLoading ? 0.7 : 1,
+            }}
+            onMouseEnter={(event) => {
+              if (!exportLoading) {
+                event.currentTarget.style.borderColor = 'var(--blue)'
+                event.currentTarget.style.color = 'var(--blue)'
+              }
+            }}
+            onMouseLeave={(event) => {
+              event.currentTarget.style.borderColor = 'var(--border)'
+              event.currentTarget.style.color = 'var(--text)'
+            }}
+          >
+            {exportLoading ? 'DESCARGANDO...' : '↓ DESCARGAR REGISTRO DE EXPERIMENTOS'}
+          </button>
+        </div>
       </section>
     </div>
   )

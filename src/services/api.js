@@ -57,67 +57,39 @@ async function request(path, options = {}) {
   return response.json()
 }
 
-export const api = {
-  startSimulation: async (params, files) => withHandling('startSimulation', async () => {
-    const formData = new FormData()
-    formData.append('params', JSON.stringify(params))
-    ;(files || []).forEach((file) => formData.append('files', file))
-
-    debugLog('startSimulation payload prepared', {
-      endpoint: `${BASE_URL}/simulation/start`,
-      params,
-      fileCount: files?.length || 0,
-      fileNames: (files || []).map((file) => file.name),
-      fileSizes: (files || []).map((file) => file.size),
+export async function startSimulation(params) {
+  return withHandling('startSimulation', () =>
+    request('/simulation/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(params),
     })
+  )
+}
 
-    try {
-      const airportsProbe = await fetch(`${BASE_URL}/airports`, {
-        method: 'GET',
-        mode: 'cors',
-        credentials: 'omit',
-      })
-      debugLog('startSimulation preflight probe GET /airports', {
-        status: airportsProbe.status,
-        ok: airportsProbe.ok,
-      })
-    } catch (probeErr) {
-      debugLog('startSimulation preflight probe GET /airports failed', {
-        error: probeErr instanceof Error ? probeErr.message : String(probeErr),
-      })
-    }
+export async function registrarExperimento() {
+  return withHandling('registrarExperimento', () =>
+    request('/experimentos/registrar', { method: 'POST' })
+  )
+}
 
-    try {
-      const optionsProbe = await fetch(`${BASE_URL}/simulation/start`, {
-        method: 'OPTIONS',
-        mode: 'cors',
-        credentials: 'omit',
-      })
-      debugLog('startSimulation preflight probe OPTIONS /simulation/start', {
-        status: optionsProbe.status,
-        ok: optionsProbe.ok,
-        allowOrigin: optionsProbe.headers.get('access-control-allow-origin'),
-        allowMethods: optionsProbe.headers.get('access-control-allow-methods'),
-      })
-    } catch (probeErr) {
-      debugLog('startSimulation preflight probe OPTIONS failed', {
-        error: probeErr instanceof Error ? probeErr.message : String(probeErr),
-      })
-    }
+export async function exportarExperimentos() {
+  return withHandling('exportarExperimentos', async () => {
+    const res = await fetch(`${BASE_URL}/experimentos/export`, { mode: 'cors', credentials: 'omit' })
+    if (res.status === 404) throw new Error('No hay experimentos registrados')
+    if (!res.ok) throw new Error(await toApiError(res))
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'experimentos.csv'
+    a.click()
+    URL.revokeObjectURL(url)
+  })
+}
 
-    try {
-      return await request('/simulation/start', {
-        method: 'POST',
-        body: formData,
-      })
-    } catch (error) {
-      debugLog('startSimulation request failed', {
-        endpoint: `${BASE_URL}/simulation/start`,
-        error: error instanceof Error ? error.message : String(error),
-      })
-      throw error
-    }
-  }),
+export const api = {
+  startSimulation,
 
   getState: async () => withHandling('getState', async () => {
     return request('/simulation/state')

@@ -104,6 +104,10 @@ public class BaggageParser {
         }
     }
 
+    public List<Envio> parse(InputStream in, String aeropuertoOrigen) {
+        return parseEnvios(in, aeropuertoOrigen, LocalDate.MIN, null, Map.of());
+    }
+
     private int resolveSla(String originAirport, String destinationAirport, Map<String, String> continentByAirport) {
         String originContinent = continentByAirport.get(originAirport);
         String destinationContinent = continentByAirport.get(destinationAirport);

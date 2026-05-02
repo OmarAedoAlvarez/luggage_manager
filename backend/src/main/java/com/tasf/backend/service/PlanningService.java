@@ -71,15 +71,13 @@ public class PlanningService {
     }
 
     private MetaheuristicAlgorithm selectAlgorithm(ParametrosSimulacion params, boolean conIncidencia) {
-        // For normal planning, honor the requested algorithm so the same dataset can
-        // be executed separately with SA or TS. Incidence replanning keeps TS.
-        String requested = conIncidencia ? TS : normalizeAlgorithm(params != null ? params.getAlgoritmo() : null);
-        String selectedName = requested != null ? requested : SA;
-        MetaheuristicAlgorithm selected = algorithms.get(selectedName);
-        if (selected == null) {
+        String selected = normalizeAlgorithm(params != null ? params.getAlgoritmo() : null);
+        String selectedName = selected != null ? selected : SA;
+        MetaheuristicAlgorithm algo = algorithms.get(selectedName);
+        if (algo == null) {
             throw new IllegalStateException("Algorithm not configured: " + selectedName);
         }
-        return selected;
+        return algo;
     }
 
     private String normalizeAlgorithm(String algorithm) {

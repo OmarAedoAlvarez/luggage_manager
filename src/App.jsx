@@ -6,7 +6,6 @@ import TopBar from './components/TopBar.jsx'
 import { api } from './services/api.js'
 import ConfigScreen from './screens/ConfigScreen.jsx'
 import EnviosScreen from './screens/EnviosScreen.jsx'
-import VuelosScreen from './screens/VuelosScreen.jsx'
 import DashboardScreen from './screens/DashboardScreen.jsx'
 import ResultadosScreen from './screens/ResultadosScreen.jsx'
 import DrawerAeropuerto from './drawers/DrawerAeropuerto.jsx'
@@ -26,10 +25,7 @@ export default function App() {
   const [screen, setScreen] = useState('main')
   const [configOpen, setConfigOpen] = useState(false)
   const [backendState, setBackendState] = useState(null)
-  const [useBackend, setUseBackend] = useState(false)
   const [staticAirports, setStaticAirports] = useState([])
-  // Remember last simulation config so reset can re-run without re-uploading
-  const [lastSimConfig, setLastSimConfig] = useState(null) // { params, files }
 
   const [filters, setFilters] = useState({
     status: ['green', 'amber', 'red'],
@@ -89,11 +85,7 @@ export default function App() {
   }
 
   function onToggleSim() {
-    if (useBackend) {
-      setAutoStep((prev) => !prev)
-    } else {
-      setRunning((prev) => !prev)
-    }
+    setAutoStep((prev) => !prev)
   }
 
   function onReset() {
@@ -139,16 +131,12 @@ export default function App() {
   }
 
   function onIniciar() {
-    if (!running && !useBackend) {
+    if (!backendState) {
       setScreen('config')
       setConfigOpen(true)
       return
     }
-    if (useBackend && autoStep) {
-      onToggleSim()
-      return
-    }
-    if (running) {
+    if (autoStep) {
       onToggleSim()
     }
   }
@@ -181,7 +169,7 @@ export default function App() {
   }, [])
 
   useEffect(() => {
-    if (useBackend && backendState?.enEjecucion && !backendState?.finalizada) {
+    if (backendState?.enEjecucion && !backendState?.finalizada) {
       setAutoStep(true)
     }
     if (backendState?.finalizada) {
@@ -191,7 +179,7 @@ export default function App() {
   }, [backendState?.enEjecucion, backendState?.finalizada])
 
   useEffect(() => {
-    if (autoStep && useBackend) {
+    if (autoStep) {
       autoStepRef.current = setInterval(async () => {
         setSimClockMinutes((current) => {
           const next = current + SIM_MINUTES_PER_REAL_SECOND
@@ -202,10 +190,10 @@ export default function App() {
       clearInterval(autoStepRef.current)
     }
     return () => clearInterval(autoStepRef.current)
-  }, [autoStep, useBackend])
+  }, [autoStep])
 
   useEffect(() => {
-    if (!useBackend || !autoStep) return
+    if (!autoStep) return
     if (simClockMinutes < 1440) return
 
     let cancelled = false
@@ -231,29 +219,27 @@ export default function App() {
     return () => {
       cancelled = true
     }
-  }, [simClockMinutes, autoStep, useBackend])
+  }, [simClockMinutes, autoStep])
 
   useEffect(() => {
-    const isActive = running || (useBackend && autoStep)
-    if (isActive && realStartRef.current === null) {
+    if (autoStep && realStartRef.current === null) {
       realStartRef.current = Date.now()
     }
-    if (!isActive && realStartRef.current !== null) {
+    if (!autoStep && realStartRef.current !== null) {
       accumulatedRealMsRef.current += Date.now() - realStartRef.current
       realStartRef.current = null
       setRealElapsedSeconds(Math.floor(accumulatedRealMsRef.current / 1000))
     }
-  }, [running, autoStep, useBackend])
+  }, [autoStep])
 
   useEffect(() => {
-    const isActive = running || (useBackend && autoStep)
-    if (!isActive) return undefined
+    if (!autoStep) return undefined
     const id = setInterval(() => {
       const liveMs = accumulatedRealMsRef.current + (Date.now() - realStartRef.current)
       setRealElapsedSeconds(Math.floor(liveMs / 1000))
     }, 250)
     return () => clearInterval(id)
-  }, [running, autoStep, useBackend])
+  }, [autoStep])
 
   useEffect(() => {
     if (running) {
@@ -284,20 +270,18 @@ export default function App() {
     return () => clearInterval(intervalRef.current)
   }, [running, maxDay])
 
-  const simState = useBackend && backendState
-    ? backendState
-    : {
-        currentDay: 0, totalDays: 0,
-        elapsedSeconds: 0, algorithm: ALGORITHM,
-        kpis: {
-          bagsInTransit: 0, bagsDelivered: 0,
-          slaCompliance: 0, activeFlights: 0,
-          slaViolated: 0,
-        },
-        airports: staticAirports,
-        flights: [], routes: [],
-        throughputHistory: [], logOperaciones: [],
-      }
+  const simState = backendState ?? {
+    currentDay: 0, totalDays: 0,
+    elapsedSeconds: 0, algorithm: ALGORITHM,
+    kpis: {
+      bagsInTransit: 0, bagsDelivered: 0,
+      slaCompliance: 0, activeFlights: 0,
+      slaViolated: 0,
+    },
+    airports: staticAirports,
+    flights: [], routes: [],
+    throughputHistory: [], logOperaciones: [],
+  }
 
   const normalizedAirports = (simState?.airports || simState?.aeropuertos || []).map((airport) => ({
     ...airport,
@@ -341,7 +325,7 @@ export default function App() {
     : (simState?.routes || [])
 
   const backendRoutes = useMemo(() => {
-    if (!useBackend || !backendState?.envios) return []
+    if (!backendState?.envios) return []
     return backendState.envios
       .filter((e) => e.planResumen)
       .map((e) => {
@@ -369,10 +353,10 @@ export default function App() {
         }
       })
       .filter((r) => r.flightLegs.length > 0)
-  }, [backendState?.envios, useBackend])
+  }, [backendState?.envios])
 
   const backendFlights = useMemo(() => {
-    if (!useBackend || !backendState?.vuelos) return []
+    if (!backendState?.vuelos) return []
     return backendState.vuelos
       .filter((v) => v.estado === 'activo' && v.enUso)
       .map((v) => {
@@ -391,10 +375,10 @@ export default function App() {
         }
       })
       .filter(Boolean)
-  }, [backendState?.vuelos, useBackend, simClockMinutes])
+  }, [backendState?.vuelos, simClockMinutes])
 
   const fechaSimuladaDisplay = useMemo(() => {
-    if (!useBackend || !backendState?.fechaSimulada) return null
+    if (!backendState?.fechaSimulada) return null
     const source = new Date(backendState.fechaSimulada)
     if (Number.isNaN(source.getTime())) return backendState.fechaSimulada
 
@@ -406,22 +390,19 @@ export default function App() {
     const hh = String(current.getHours()).padStart(2, '0')
     const mi = String(current.getMinutes()).padStart(2, '0')
     return `${yyyy}-${mm}-${dd} ${hh}:${mi}`
-  }, [useBackend, backendState?.fechaSimulada, simClockMinutes])
+  }, [backendState?.fechaSimulada, simClockMinutes])
 
   useEffect(() => {
     if (!selectedFlight) {
       setMapSelectedVuelo(null)
       return
     }
-    // Only update the drawer vuelo when a new flight is selected.
-    // Don't close it if it temporarily leaves backendFlights due to clock tick.
-    const source = useBackend ? backendFlights : normalizedFlights
-    const vuelo = source.find((f) => f.id === selectedFlight)
+    const vuelo = backendFlights.find((f) => f.id === selectedFlight)
     if (vuelo) setMapSelectedVuelo(vuelo)
     // If vuelo not found in current frame, keep the previous drawer content open.
-  }, [selectedFlight, useBackend, backendState, normalizedFlights])
+  }, [selectedFlight, backendState, backendFlights])
 
-  const activeKpis = useBackend && backendState?.kpis
+  const activeKpis = backendState?.kpis
     ? {
         bagsInTransit: backendState.kpis.maletasEnTransito,
         bagsDelivered: backendState.kpis.maletasEntregadas,
@@ -436,16 +417,13 @@ export default function App() {
       }
 
   async function handleReset() {
-    if (useBackend) {
-      try {
-        await api.resetSimulation()
-      } catch (err) {
-        console.error('Reset backend error:', err)
-      }
-      stopPolling()
+    try {
+      await api.resetSimulation()
+    } catch (err) {
+      console.error('Reset backend error:', err)
     }
+    stopPolling()
     onReset()
-    setUseBackend(false)
     setBackendState(null)
   }
 
@@ -453,18 +431,15 @@ export default function App() {
     <>
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden', background: 'var(--bg)' }}>
       <TopBar
-        currentDay={useBackend ? (backendState?.diaActual ?? 0) : (running ? simDay : 0)}
-        totalDays={useBackend ? (backendState?.totalDias ?? 0) : (running ? maxDay : 0)}
-        elapsedSeconds={useBackend
-          ? (backendState?.diaActual ? backendState.diaActual * 86400 : 0)
-          : simState?.elapsedSeconds ?? 0}
-        fechaSimulada={useBackend ? fechaSimuladaDisplay : null}
+        currentDay={backendState?.diaActual ?? 0}
+        totalDays={backendState?.totalDias ?? 0}
+        elapsedSeconds={backendState?.diaActual ? backendState.diaActual * 86400 : 0}
+        fechaSimulada={fechaSimuladaDisplay}
         realElapsedSeconds={realElapsedSeconds}
         simRateLabel={null}
         kpis={activeKpis}
-        isRunning={useBackend ? autoStep : running}
+        isRunning={autoStep}
         running={running}
-        useBackend={useBackend}
         backendState={backendState}
         onToggleSim={onToggleSim}
         onReset={handleReset}
@@ -476,7 +451,7 @@ export default function App() {
         }}
         onIniciar={onIniciar}
         screen={screen}
-        hasSimulation={Boolean(useBackend && backendState)}
+        hasSimulation={Boolean(backendState)}
       />
       <div style={{ flex: 1, overflow: 'hidden', position: 'relative', minHeight: 0 }}>
         {/* ── OPERACIONES (main map view) ─────────────────────────────── */}
@@ -511,8 +486,8 @@ export default function App() {
 
               <MapView
                 airports={normalizedAirports}
-                routes={useBackend ? backendRoutes : normalizedRoutes}
-                flights={useBackend ? backendFlights : normalizedFlights}
+                routes={backendRoutes}
+                flights={backendFlights}
                 filters={filters}
                 threshold={threshold}
                 simHour={simHour}
@@ -541,7 +516,7 @@ export default function App() {
               {/* Detail Drawers */}
               <DrawerAeropuerto
                 airport={mapSelectedAirport}
-                vuelos={useBackend ? (backendState?.vuelos || []) : (simState?.flights || [])}
+                vuelos={backendState?.vuelos || []}
                 onClose={() => setMapSelectedAirport(null)}
               />
               <DrawerVuelo
@@ -553,7 +528,7 @@ export default function App() {
             {/* Right Panel Container */}
             <div style={{ overflow: 'hidden', borderLeft: rightOpen ? '1px solid var(--border)' : 'none', background: 'var(--panel)' }}>
               <RightPanel
-                flights={useBackend ? backendFlights : normalizedFlights}
+                flights={backendFlights}
                 airports={normalizedAirports}
                 threshold={threshold}
                 selectedFlight={selectedFlight}
@@ -594,10 +569,8 @@ export default function App() {
                   setScreen('main')
                   setConfigOpen(false)
                 }}
-                onSimulationStarted={(state, params, files) => {
-                  setLastSimConfig({ params, files })
+                onSimulationStarted={(state) => {
                   setConfigOpen(false)
-                  setUseBackend(true)
                   setBackendState(state)
                   setSimClockMinutes(0)
                   setScreen('main')
@@ -629,6 +602,7 @@ export default function App() {
         ['  con plan',          enviosConPlan.length],
         ['simClockMinutes',     simClockMinutes],
         ['backendFlights',      backendFlights.length],
+        ['autoStep',           String(autoStep)],
         ['samplePlanResumen',   samplePlan?.planResumen ?? 'none'],
       ]
       return (

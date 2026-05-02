@@ -16,8 +16,6 @@ public class ParametrosSimulacion {
     private int diasSimulacion;
     @Builder.Default
     private Boolean esColapso = false;
-    private int capacidadAlmacen;
-    private int capacidadVuelo;
     @Builder.Default
     private int minutosEscalaMinima = 10;
     @Builder.Default
