@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(del \"d:\\\\Personal\\\\REPOSTIORIES\\\\luggage_manager\\\\src\\\\screens\\\\VuelosScreen.jsx\")"
+      "Bash(del \"d:\\\\Personal\\\\REPOSTIORIES\\\\luggage_manager\\\\src\\\\screens\\\\VuelosScreen.jsx\")",
+      "Read(//d/Personal/REPOSTIORIES/luggage_manager/backend/src/main/resources/data/Envios/**)"
     ]
   }
 }

@@ -1,2 +1,4 @@
 experimento_id,fecha_hora,algoritmo,dias_simulacion,tiempo_planificacion_ms,rutas_evaluadas,fitness,envios_totales,envios_entregados,envios_sla_ok,pct_sla_cumplido,sla_violados,envios_no_planificados,ocupacion_promedio_almacen
 0b89c439-7bd8-4689-bc3a-7b455f22659d,2026-05-02T17:06:35.328267Z,SA,3,15,2575,2575,1495,2,73,0.00,653,653,15.97
+c48690b2-eec4-47bb-8648-57d49774ac62,2026-05-03T01:51:02.105464400Z,TS,3,118864,142790,142790,1495,1454,2057,100.00,0,0,10.97
+7f59b47b-095d-4a97-9aa8-d194fa34f5db,2026-05-03T01:53:01.106815700Z,SA,3,6348,73233,73233,1495,1454,2057,100.00,0,0,10.97

@@ -5,12 +5,14 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -63,13 +65,18 @@ class SimulationControllerIntegrationTest {
             .andExpect(status().isOk())
             .andExpect(jsonPath("$[0].codigoVuelo").exists());
 
-        mockMvc.perform(get("/api/envios"))
+        MvcResult enviosResult = mockMvc.perform(get("/api/envios"))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$[0].idEnvio").exists());
+            .andExpect(jsonPath("$[0].idEnvio").exists())
+            .andReturn();
 
-        mockMvc.perform(get("/api/envios/000000001"))
+        String firstEnvioId = new ObjectMapper()
+            .readTree(enviosResult.getResponse().getContentAsString())
+            .get(0).get("idEnvio").asText();
+
+        mockMvc.perform(get("/api/envios/" + firstEnvioId))
             .andExpect(status().isOk())
-            .andExpect(jsonPath("$.idEnvio").value("000000001"))
+            .andExpect(jsonPath("$.idEnvio").value(firstEnvioId))
             .andExpect(jsonPath("$.planDetalle").exists());
 
         mockMvc.perform(post("/api/simulation/reset"))

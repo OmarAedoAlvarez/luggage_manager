@@ -72,12 +72,17 @@ public class TabuSearchAlgorithm extends RoutePlannerSupport implements Metaheur
             Map<String, List<RouteCandidate>> pool = buildCandidatePool(envios, vuelos, aeropuertos, params, routeCounter);
             Map<String, Envio> envioById = envios.stream().collect(HashMap::new, (m, e) -> m.put(e.getIdEnvio(), e), Map::putAll);
 
+            log.debug("SEED input: envios={} poolKeys={}", envios.size(), pool.size());
+
             Map<String, RouteCandidate> current = new HashMap<>();
+            int unroutedCount = 0;
             for (Envio envio : envios) {
                 List<RouteCandidate> options = pool.getOrDefault(envio.getIdEnvio(), List.of());
+                log.debug("SEED envio={} origin={} candidates={}", envio.getIdEnvio(), envio.getAeropuertoOrigen(), options.size());
                 if (options.isEmpty()) {
                     envio.setEstado(EstadoEnvio.RETRASADO);
                     log.warn("Envio {} has no feasible routes; marked RETRASADO", envio.getIdEnvio());
+                    unroutedCount++;
                     continue;
                 }
                 // Baseline assignment: take the first (earliest-arrival) candidate
@@ -90,6 +95,8 @@ public class TabuSearchAlgorithm extends RoutePlannerSupport implements Metaheur
                 current.put(envio.getIdEnvio(), options.get(0));
                 envio.setEstado(EstadoEnvio.PLANIFICADO);
             }
+
+            log.info("TS seeding complete: {} envios in current, {} unrouted", current.size(), unroutedCount);
 
             if (current.isEmpty()) {
                 saveMetric(start, routeCounter.get());
@@ -199,6 +206,10 @@ public class TabuSearchAlgorithm extends RoutePlannerSupport implements Metaheur
             int cycles = plannedEnvios.isEmpty() ? 0 : totalIterations / plannedEnvios.size();
             log.info("TS planning completed: {} envios planned in {}ms ({} iterations, {} cycles)",
                 current.size(), elapsed, totalIterations, cycles);
+            // Ensure best contains all planned envios, not just improved ones
+            if (best.size() < current.size()) {
+                best = new HashMap<>(current);
+            }
             saveMetric(start, routeCounter.get());
             return toPlans(best, envioById, params, getNombre());
         } catch (RuntimeException ex) {

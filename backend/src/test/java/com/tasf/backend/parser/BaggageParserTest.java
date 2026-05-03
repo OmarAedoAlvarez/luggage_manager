@@ -35,8 +35,8 @@ class BaggageParserTest {
         );
 
         assertEquals(2, result.size());
-        assertEquals("E002", result.get(0).getIdEnvio());
-        assertEquals("E003", result.get(1).getIdEnvio());
+        assertEquals("OJAI-E002", result.get(0).getIdEnvio());
+        assertEquals("OJAI-E003", result.get(1).getIdEnvio());
     }
 
     @Test
@@ -59,7 +59,7 @@ class BaggageParserTest {
         );
 
         assertEquals(2, result.size());
-        assertEquals("E002", result.get(0).getIdEnvio());
-        assertEquals("E003", result.get(1).getIdEnvio());
+        assertEquals("OJAI-E002", result.get(0).getIdEnvio());
+        assertEquals("OJAI-E003", result.get(1).getIdEnvio());
     }
 }

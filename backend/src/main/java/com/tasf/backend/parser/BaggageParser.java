@@ -90,7 +90,7 @@ public class BaggageParser {
             String destinationAirport = parts[4].trim();
 
             return Envio.builder()
-                .idEnvio(parts[0].trim())
+                .idEnvio(originAirport + "-" + parts[0].trim())
                 .codigoAerolinea(parts[6].trim())
                 .aeropuertoOrigen(originAirport)
                 .aeropuertoDestino(destinationAirport)
