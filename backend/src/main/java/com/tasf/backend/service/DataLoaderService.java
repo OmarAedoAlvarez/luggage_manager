@@ -6,6 +6,8 @@ import com.tasf.backend.domain.Vuelo;
 import com.tasf.backend.parser.AirportParser;
 import com.tasf.backend.parser.BaggageParser;
 import com.tasf.backend.parser.FlightParser;
+import com.tasf.backend.repository.AeropuertoRepository;
+import com.tasf.backend.repository.VueloRepository;
 import jakarta.annotation.PostConstruct;
 import java.io.IOException;
 import java.io.InputStream;
@@ -26,73 +28,62 @@ import org.springframework.stereotype.Service;
 @Service
 public class DataLoaderService {
     private static final Logger log = LoggerFactory.getLogger(DataLoaderService.class);
-    private static final Pattern IATA_PATTERN =
-        Pattern.compile("_envios_([A-Za-z]{4})_\\.txt$", Pattern.CASE_INSENSITIVE);
 
-    private final AirportParser airportParser;
-    private final FlightParser flightParser;
-    private final BaggageParser baggageParser;
+    private final AeropuertoRepository aeropuertoRepository;
+    private final VueloRepository vueloRepository;
+    private final DatabaseSeederService databaseSeederService;
 
     private List<Aeropuerto> aeropuertos = new ArrayList<>();
     private List<Vuelo> vuelos = new ArrayList<>();
-    private List<Envio> todosLosEnvios = new ArrayList<>();
 
-    public DataLoaderService(AirportParser airportParser, FlightParser flightParser, BaggageParser baggageParser) {
-        this.airportParser = airportParser;
-        this.flightParser = flightParser;
-        this.baggageParser = baggageParser;
+    public DataLoaderService(
+            AeropuertoRepository aeropuertoRepository,
+            VueloRepository vueloRepository,
+            DatabaseSeederService databaseSeederService) {
+        this.aeropuertoRepository = aeropuertoRepository;
+        this.vueloRepository = vueloRepository;
+        this.databaseSeederService = databaseSeederService;
     }
 
     @PostConstruct
-    public void loadStaticData() {
-        List<Aeropuerto> loadedAirports = new ArrayList<>();
-        List<Vuelo> loadedFlights = new ArrayList<>();
+    public void init() {
+        // Fase 3: Poblar la DB si está vacía
+        databaseSeederService.seedDatabaseIfEmpty();
+        
+        // Fase 4: Cargar datos estáticos desde DB a memoria (para el motor)
+        loadStaticDataFromDb();
+    }
 
-        try (InputStream airportsStream = new ClassPathResource("data/aeropuertos.txt").getInputStream()) {
-            loadedAirports = airportParser.parseAirports(airportsStream);
-        } catch (IOException ex) {
-            log.error("Unable to load static airport data", ex);
-        }
+    private void loadStaticDataFromDb() {
+        log.info("Loading static data from database...");
+        
+        this.aeropuertos = aeropuertoRepository.findAll().stream()
+            .map(e -> Aeropuerto.builder()
+                .codigoIATA(e.getCodigoIata())
+                .nombre(e.getCiudad() + " Airport") // Mantenemos la lógica del parser original
+                .ciudad(e.getCiudad())
+                .pais(e.getPais())
+                .continente(e.getContinente())
+                .huso(e.getHuso())
+                .capacidadAlmacen(e.getCapacidadAlmacen())
+                .lat(e.getLat())
+                .lng(e.getLng())
+                .build())
+            .toList();
 
-        Map<String, String> continentByAirport = loadedAirports.stream()
-            .collect(Collectors.toMap(Aeropuerto::getCodigoIATA, Aeropuerto::getContinente, (a, b) -> a));
+        this.vuelos = vueloRepository.findAll().stream()
+            .map(e -> Vuelo.builder()
+                .codigoVuelo(e.getCodigoVuelo())
+                .origen(e.getIataOrigen())
+                .destino(e.getIataDestino())
+                .horaSalida(e.getHoraSalida())
+                .horaLlegada(e.getHoraLlegada())
+                .capacidadTotal(e.getCapacidadTotal())
+                .tipo(e.getTipo())
+                .build())
+            .toList();
 
-        try (InputStream flightsStream = new ClassPathResource("data/planes_vuelo.txt").getInputStream()) {
-            loadedFlights = flightParser.parseFlights(flightsStream, continentByAirport);
-        } catch (IOException ex) {
-            log.error("Unable to load static flight data", ex);
-        }
-
-        this.aeropuertos = List.copyOf(loadedAirports);
-        this.vuelos = List.copyOf(loadedFlights);
-        log.info("Loaded {} airports and {} flights", this.aeropuertos.size(), this.vuelos.size());
-
-        List<Envio> loadedEnvios = new ArrayList<>();
-        try {
-            PathMatchingResourcePatternResolver resolver = new PathMatchingResourcePatternResolver();
-            Resource[] resources = resolver.getResources("classpath:data/Envios/_envios_*.txt");
-            for (Resource resource : resources) {
-                String filename = resource.getFilename();
-                Matcher matcher = IATA_PATTERN.matcher(filename != null ? filename : "");
-                if (!matcher.find()) {
-                    log.warn("Skipping envio file with unexpected name: {}", filename);
-                    continue;
-                }
-                String iata = matcher.group(1).toUpperCase();
-                try (InputStream in = resource.getInputStream()) {
-                    List<Envio> fileEnvios =
-                        baggageParser.parseEnvios(in, iata, LocalDate.MIN, null, continentByAirport);
-                    log.info("Loaded {} envios from {} (origin={})", fileEnvios.size(), filename, iata);
-                    loadedEnvios.addAll(fileEnvios);
-                } catch (IOException ex) {
-                    log.error("Error reading envio file: {}", filename, ex);
-                }
-            }
-        } catch (IOException ex) {
-            log.error("Unable to scan envio classpath resources", ex);
-        }
-        this.todosLosEnvios = List.copyOf(loadedEnvios);
-        log.info("Total envios loaded: {}", this.todosLosEnvios.size());
+        log.info("Loaded {} airports and {} flights from DB", this.aeropuertos.size(), this.vuelos.size());
     }
 
     public List<Aeropuerto> getAeropuertos() {
@@ -103,7 +94,7 @@ public class DataLoaderService {
         return vuelos;
     }
 
-    public List<Envio> getTodosLosEnvios() {
-        return todosLosEnvios;
-    }
+    // Nota: El método getTodosLosEnvios() se elimina porque ya no cargamos todo en memoria.
+    // El SimulationController ahora debe pedir los envíos por rango de fechas al repositorio.
 }
+

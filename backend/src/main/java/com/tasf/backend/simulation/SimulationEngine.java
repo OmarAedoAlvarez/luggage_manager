@@ -20,6 +20,7 @@ import com.tasf.backend.dto.ThroughputDiaDTO;
 import com.tasf.backend.dto.VueloDTO;
 import com.tasf.backend.service.DataLoaderService;
 import com.tasf.backend.service.PlanningService;
+import com.tasf.backend.service.SimulationPersistenceService;
 import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
@@ -49,6 +50,7 @@ public class SimulationEngine {
 
     private final DataLoaderService dataLoaderService;
     private final PlanningService planningService;
+    private final SimulationPersistenceService persistenceService;
     private final Random random = new Random();
 
     private ParametrosSimulacion params;
@@ -69,9 +71,10 @@ public class SimulationEngine {
     private final Map<String, String> maletaVueloActual = new HashMap<>();
     private final List<ThroughputDiaDTO> throughputHistorial = new ArrayList<>();
 
-    public SimulationEngine(DataLoaderService dataLoaderService, PlanningService planningService) {
+    public SimulationEngine(DataLoaderService dataLoaderService, PlanningService planningService, SimulationPersistenceService persistenceService) {
         this.dataLoaderService = dataLoaderService;
         this.planningService = planningService;
+        this.persistenceService = persistenceService;
     }
 
     public synchronized void inicializar(ParametrosSimulacion params, List<Envio> todosLosEnvios) {
@@ -272,6 +275,10 @@ public class SimulationEngine {
             // ─────────────────────────────────────────────────────────────────────────
 
             addOperationLog("Simulation completed - Day " + diaActual);
+            
+            // Fase 6: Persistir resultados finales en DB
+            persistenceService.persistSimulationResults(planes, metricas, logOperaciones, envios);
+            
             return getEstado();
         }
 
@@ -376,7 +383,45 @@ public class SimulationEngine {
         }
     }
 
+    public synchronized void agregarNuevosEnvios(List<Envio> nuevosEnvios) {
+        if (!enEjecucion || params == null) {
+            log.warn("Cannot add envios: simulation is not running.");
+            return;
+        }
+        
+        // Filtrar los que estén dentro del rango de la simulación actual
+        LocalDate fechaInicio = params.getFechaInicio();
+        LocalDate fechaFinSim = fechaInicio.plusDays(params.getDiasSimulacion());
+        
+        List<Envio> validos = nuevosEnvios.stream()
+            .filter(e -> {
+                LocalDate d = e.getFechaHoraIngreso().toLocalDate();
+                return !d.isBefore(fechaInicio) && !d.isAfter(fechaFinSim);
+            })
+            .toList();
+            
+        if (validos.isEmpty()) {
+            log.info("No new envios fit in the current simulation time window.");
+            return;
+        }
+
+        List<Envio> copias = deepCopyEnvios(validos);
+        this.envios.addAll(copias);
+        
+        List<Maleta> nuevasMaletas = generarMaletas(copias);
+        this.maletas.addAll(nuevasMaletas);
+        
+        copias.forEach(e -> e.setEstado(EstadoEnvio.PLANIFICADO));
+        nuevasMaletas.forEach(m -> m.setEstado(EstadoMaleta.EN_ALMACEN));
+        
+        addOperationLog("[LOG] Cargados " + validos.size() + " nuevos envíos vía upload. Iniciando replanificación...");
+        
+        replanificar(nuevasMaletas);
+        updateWarehouseOccupation();
+    }
+
     public synchronized SimulationStateDTO getEstado() {
+
         if (params == null) {
             return SimulationStateDTO.builder()
                 .diaActual(0)

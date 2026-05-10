@@ -8,6 +8,7 @@ import com.tasf.backend.dto.SimulationStateDTO;
 import com.tasf.backend.dto.VueloDTO;
 import com.tasf.backend.service.DataLoaderService;
 import com.tasf.backend.simulation.SimulationEngine;
+import com.tasf.backend.repository.EnvioRepository;
 import java.util.List;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,18 +30,43 @@ public class SimulationController {
 
     private final SimulationEngine simulationEngine;
     private final DataLoaderService dataLoaderService;
+    private final EnvioRepository envioRepository;
 
-    public SimulationController(SimulationEngine simulationEngine, DataLoaderService dataLoaderService) {
+    public SimulationController(
+            SimulationEngine simulationEngine, 
+            DataLoaderService dataLoaderService,
+            EnvioRepository envioRepository) {
         this.simulationEngine = simulationEngine;
         this.dataLoaderService = dataLoaderService;
+        this.envioRepository = envioRepository;
     }
 
     @PostMapping(value = "/simulation/start", consumes = MediaType.APPLICATION_JSON_VALUE)
     public ResponseEntity<SimulationStateDTO> start(@RequestBody ParametrosSimulacion params) {
         log.info("startSimulation request: fechaInicio={}, dias={}, esColapso={}, algoritmo={}",
             params.getFechaInicio(), params.getDias(), params.getEsColapso(), params.getAlgoritmo());
-        List<Envio> todosLosEnvios = dataLoaderService.getTodosLosEnvios();
-        simulationEngine.inicializar(params, todosLosEnvios);
+        
+        // Fase 4: Cargar solo los envíos necesarios para el periodo de simulación
+        java.time.LocalDateTime inicio = params.getFechaInicio().atStartOfDay();
+        java.time.LocalDateTime fin = inicio.plusDays(params.getDias());
+        
+        log.info("Querying envios from {} to {}", inicio, fin);
+        List<Envio> enviosSimulacion = envioRepository.findByFechaHoraIngresoBetween(inicio, fin).stream()
+            .map(e -> Envio.builder()
+                .idEnvio(e.getIdPedido())
+                .codigoAerolinea(e.getCodigoAerolinea())
+                .aeropuertoOrigen(e.getIataOrigen())
+                .aeropuertoDestino(e.getIataDestino())
+                .fechaHoraIngreso(e.getFechaHoraIngreso())
+                .cantidadMaletas(e.getCantidadMaletas())
+                .sla(e.getSla())
+                .estado(com.tasf.backend.domain.EstadoEnvio.valueOf(e.getEstado()))
+                .build())
+            .toList();
+            
+        log.info("Found {} envios for simulation period", enviosSimulacion.size());
+        
+        simulationEngine.inicializar(params, enviosSimulacion);
         log.info("startSimulation initialized successfully");
         return ResponseEntity.ok(simulationEngine.getEstado());
     }
