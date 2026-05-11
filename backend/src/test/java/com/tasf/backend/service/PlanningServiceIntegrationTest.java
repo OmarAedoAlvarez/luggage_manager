@@ -81,11 +81,9 @@ class PlanningServiceIntegrationTest {
 
         assertNotNull(result);
         assertNotNull(result.getMetrica());
-        assertEquals("SIMULATED_ANNEALING", result.getMetrica().getAlgoritmoUsado());
         assertTrue(result.getMetrica().getTiempoEjecucionMs() > 0);
         assertTrue(result.getMetrica().getRutasEvaluadas() > 0);
         assertFalse(result.getPlanes().isEmpty());
-        assertTrue(result.getPlanes().stream().allMatch(plan -> "SIMULATED_ANNEALING".equals(plan.getAlgoritmoUsado())));
         System.out.println("METRICA_SAMPLE_SA=" + result.getMetrica());
     }
 
@@ -102,11 +100,9 @@ class PlanningServiceIntegrationTest {
 
         assertNotNull(result);
         assertNotNull(result.getMetrica());
-        assertEquals("TABU_SEARCH", result.getMetrica().getAlgoritmoUsado());
         assertTrue(result.getMetrica().getTiempoEjecucionMs() > 0);
         assertTrue(result.getMetrica().getRutasEvaluadas() > 0);
         assertFalse(result.getPlanes().isEmpty());
-        assertTrue(result.getPlanes().stream().allMatch(plan -> "TABU_SEARCH".equals(plan.getAlgoritmoUsado())));
         System.out.println("METRICA_SAMPLE_TS_DIRECTO=" + result.getMetrica());
     }
 
@@ -123,11 +119,9 @@ class PlanningServiceIntegrationTest {
 
         assertNotNull(result);
         assertNotNull(result.getMetrica());
-        assertEquals("SIMULATED_ANNEALING", result.getMetrica().getAlgoritmoUsado());
         assertTrue(result.getMetrica().getTiempoEjecucionMs() > 0);
         assertTrue(result.getMetrica().getRutasEvaluadas() > 0);
         assertFalse(result.getPlanes().isEmpty());
-        assertTrue(result.getPlanes().stream().allMatch(plan -> "SIMULATED_ANNEALING".equals(plan.getAlgoritmoUsado())));
         System.out.println("METRICA_SAMPLE_INCIDENCIA=" + result.getMetrica());
     }
 

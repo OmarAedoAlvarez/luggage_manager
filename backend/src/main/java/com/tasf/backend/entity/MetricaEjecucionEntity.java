@@ -17,16 +17,13 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class MetricaEjecucionEntity {
 
-    /** Generado por los algoritmos: "MET-SIMULATED_ANNEALING-<nanoTime>" */
+    /** Generado por los algoritmos: "MET-<nanoTime>" */
     @Id
     @Column(name = "id_metrica", length = 100, nullable = false)
     private String idMetrica;
 
     @Column(name = "id_itinerario", length = 120)
     private String idItinerario;
-
-    @Column(name = "algoritmo_usado", length = 50, nullable = false)
-    private String algoritmoUsado;
 
     @Column(name = "rutas_evaluadas", nullable = false)
     private int rutasEvaluadas;

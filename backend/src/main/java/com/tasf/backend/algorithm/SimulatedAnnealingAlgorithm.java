@@ -161,8 +161,7 @@ public class SimulatedAnnealingAlgorithm extends RoutePlannerSupport implements 
 
     private void saveMetric(long start, int routesEvaluated) {
         this.ultimaMetrica = MetricaAlgoritmo.builder()
-            .idMetrica("MET-" + getNombre() + "-" + System.nanoTime())
-            .algoritmoUsado(getNombre())
+            .idMetrica("MET-" + System.nanoTime())
             .tiempoEjecucionMs(Math.max(1, System.currentTimeMillis() - start))
             .rutasEvaluadas(Math.max(0, routesEvaluated))
             .fechaEjecucion(LocalDateTime.now())

@@ -12,7 +12,6 @@ import lombok.NoArgsConstructor;
 @AllArgsConstructor
 public class MetricaAlgoritmo {
     private String idMetrica;
-    private String algoritmoUsado;
     private long tiempoEjecucionMs;
     private int rutasEvaluadas;
     private LocalDateTime fechaEjecucion;

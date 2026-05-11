@@ -32,4 +32,8 @@ build/
 ### VS Code ###
 .vscode/
 .env
+src/main/resources/application-local.properties
 
+# Ignorar los archivos generados de base de datos
+seed_data.sql
+sql_envios/
