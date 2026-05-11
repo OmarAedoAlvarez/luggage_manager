@@ -104,16 +104,28 @@ public class SimulationPersistenceService {
 
         // 4. Actualizar estado de los envíos en la DB
         for (com.tasf.backend.domain.Envio de : domainEnvios) {
-            // Buscamos el envío en la DB por su idPedido
-            // Nota: Esto es costoso en un loop. En producción se haría un batch update.
-            // Pero para este volumen (miles) está bien.
-            envioRepository.findAll().stream()
+            Optional<EnvioEntity> existing = envioRepository.findAll().stream()
                 .filter(e -> e.getIdPedido().equals(de.getIdEnvio()))
-                .findFirst()
-                .ifPresent(entity -> {
-                    entity.setEstado(de.getEstado().name());
-                    envioRepository.save(entity);
-                });
+                .findFirst();
+
+            if (existing.isPresent()) {
+                EnvioEntity entity = existing.get();
+                entity.setEstado(de.getEstado().name());
+                envioRepository.save(entity);
+            } else {
+                // Si es un envío nuevo (subido por UI), lo insertamos
+                EnvioEntity newEntity = EnvioEntity.builder()
+                    .idPedido(de.getIdEnvio())
+                    .codigoAerolinea(de.getCodigoAerolinea())
+                    .iataOrigen(de.getAeropuertoOrigen())
+                    .iataDestino(de.getAeropuertoDestino())
+                    .cantidadMaletas(de.getCantidadMaletas())
+                    .fechaHoraIngreso(de.getFechaHoraIngreso())
+                    .sla(de.getSla())
+                    .estado(de.getEstado().name())
+                    .build();
+                envioRepository.save(newEntity);
+            }
         }
 
         log.info("Simulation results persisted successfully.");
