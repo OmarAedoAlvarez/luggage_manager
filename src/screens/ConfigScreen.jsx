@@ -1,5 +1,7 @@
-import React, { useState } from 'react'
-import { startSimulation } from '../services/api.js'
+import React, { useRef, useState } from 'react'
+import { api, startSimulation } from '../services/api.js'
+
+const FILE_PATTERN = /_envios_[A-Za-z]{4}_\.txt$/i
 
 const PERIOD_OPTIONS = [
   { key: '3', label: '3 DIAS', sublabel: 'Simulacion corta' },
@@ -33,6 +35,12 @@ export default function ConfigScreen({ onCancel, onSimulationStarted }) {
   const [semaforo, setSemaforo] = useState({ verde: 60, ambar: 85 })
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
+  const [uploadFile, setUploadFile] = useState(null)
+  const [uploadFileError, setUploadFileError] = useState(null)
+  const [uploadLoading, setUploadLoading] = useState(false)
+  const [uploadResult, setUploadResult] = useState(null)
+  const [uploadError, setUploadError] = useState(null)
+  const fileInputRef = useRef(null)
 
   const semaforoError = Number(semaforo.ambar) <= Number(semaforo.verde)
     ? 'Umbral ámbar debe ser mayor que verde'
@@ -51,6 +59,41 @@ export default function ConfigScreen({ onCancel, onSimulationStarted }) {
       alignItems: 'center',
       textAlign: 'left',
       opacity: loading ? 0.7 : 1,
+    }
+  }
+
+  function handleFileChange(event) {
+    const file = event.target.files[0]
+    setUploadResult(null)
+    setUploadError(null)
+    if (!file) {
+      setUploadFile(null)
+      setUploadFileError(null)
+      return
+    }
+    if (!FILE_PATTERN.test(file.name)) {
+      setUploadFile(null)
+      setUploadFileError('Nombre inválido. Debe ser: _envios_XXXX_.txt')
+      return
+    }
+    setUploadFile(file)
+    setUploadFileError(null)
+  }
+
+  async function handleUpload() {
+    if (!uploadFile) return
+    setUploadLoading(true)
+    setUploadError(null)
+    setUploadResult(null)
+    try {
+      const result = await api.uploadEnvios(uploadFile)
+      setUploadResult(result)
+      setUploadFile(null)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setUploadLoading(false)
     }
   }
 
@@ -152,6 +195,89 @@ export default function ConfigScreen({ onCancel, onSimulationStarted }) {
               disabled={loading}
               style={{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', fontFamily: 'var(--mono)', fontSize: 13, padding: '8px 10px' }}
             />
+          </div>
+
+          <div style={{ marginTop: 20 }}>
+            <span style={sectionHeaderStyle()}>Archivo de envíos</span>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".txt"
+              onChange={handleFileChange}
+              disabled={loading || uploadLoading}
+              style={{ display: 'none' }}
+              id="upload-envios-input"
+            />
+            <label
+              htmlFor="upload-envios-input"
+              style={{
+                display: 'block',
+                width: '100%',
+                padding: '8px 12px',
+                border: '1px solid var(--border)',
+                background: 'transparent',
+                color: 'var(--muted)',
+                fontFamily: 'var(--mono)',
+                fontSize: 12,
+                textTransform: 'uppercase',
+                letterSpacing: 1,
+                cursor: loading || uploadLoading ? 'not-allowed' : 'pointer',
+                textAlign: 'center',
+                opacity: loading || uploadLoading ? 0.5 : 1,
+                boxSizing: 'border-box',
+              }}
+            >
+              Seleccionar archivo
+            </label>
+
+            {uploadFileError && (
+              <div style={{ marginTop: 6, color: 'var(--red)', fontFamily: 'var(--mono)', fontSize: 11 }}>
+                {uploadFileError}
+              </div>
+            )}
+
+            {uploadFile && !uploadFileError && (
+              <div style={{ marginTop: 8 }}>
+                <div style={{ fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--muted)', marginBottom: 6, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {uploadFile.name}
+                </div>
+                <button
+                  onClick={handleUpload}
+                  disabled={uploadLoading || loading}
+                  style={{
+                    width: '100%',
+                    padding: '7px 12px',
+                    background: 'rgba(88,166,255,0.08)',
+                    border: '1px solid rgba(88,166,255,0.3)',
+                    color: 'var(--blue)',
+                    fontFamily: 'var(--mono)',
+                    fontSize: 12,
+                    textTransform: 'uppercase',
+                    letterSpacing: 1,
+                    cursor: uploadLoading || loading ? 'not-allowed' : 'pointer',
+                    opacity: uploadLoading || loading ? 0.5 : 1,
+                  }}
+                >
+                  {uploadLoading ? 'Subiendo...' : 'Subir'}
+                </button>
+              </div>
+            )}
+
+            {uploadResult && (
+              <div style={{ marginTop: 6, color: 'var(--green)', fontFamily: 'var(--mono)', fontSize: 11 }}>
+                {uploadResult.count} envíos cargados
+              </div>
+            )}
+
+            {uploadError && (
+              <div style={{ marginTop: 6, color: 'var(--red)', fontFamily: 'var(--mono)', fontSize: 11 }}>
+                {uploadError}
+              </div>
+            )}
+
+            <div style={{ marginTop: 8, color: 'var(--muted)', fontFamily: 'var(--mono)', fontSize: 10, opacity: 0.6 }}>
+              Formato: _envios_XXXX_.txt
+            </div>
           </div>
         </aside>
 

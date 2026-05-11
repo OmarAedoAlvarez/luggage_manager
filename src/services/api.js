@@ -126,4 +126,19 @@ export const api = {
   cancelEnvio: async (idEnvio) => withHandling('cancelEnvio', async () => {
     return request(`/simulation/cancel-envio/${idEnvio}`, { method: 'POST' })
   }),
+
+  uploadEnvios: async (file) => withHandling('uploadEnvios', async () => {
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await fetch(`${BASE_URL}/upload/envios`, {
+      method: 'POST',
+      mode: 'cors',
+      credentials: 'omit',
+      body: formData,
+    })
+    if (!response.ok) {
+      throw new Error(await toApiError(response))
+    }
+    return response.json()
+  }),
 }

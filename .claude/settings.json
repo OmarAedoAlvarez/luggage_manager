@@ -2,7 +2,10 @@
   "permissions": {
     "allow": [
       "Bash(del \"d:\\\\Personal\\\\REPOSTIORIES\\\\luggage_manager\\\\src\\\\screens\\\\VuelosScreen.jsx\")",
-      "Read(//d/Personal/REPOSTIORIES/luggage_manager/backend/src/main/resources/data/Envios/**)"
+      "Read(//d/Personal/REPOSTIORIES/luggage_manager/backend/src/main/resources/data/Envios/**)",
+      "Bash(grep -E '\\\\.\\(md|json|xml|yaml|yml\\)$|^d')",
+      "Bash(xargs -I {} sh -c 'echo \"=== {} ===\" && wc -l {}')",
+      "Bash(xargs grep -l \"api\\\\|fetch\\\\|axios\")"
     ]
   }
 }
