@@ -17,7 +17,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 public class ItinerarioEntity {
 
-    /** Generado por RouteCandidate.toPlan(): "EBCI-000000001-SIMULATED_ANNEALING-v1" */
+    /** Generado por RouteCandidate.toPlan(): "EBCI-000000001-v1" */
     @Id
     @Column(name = "id_itinerario", length = 120, nullable = false)
     private String idItinerario;
@@ -30,9 +30,6 @@ public class ItinerarioEntity {
 
     @Column(name = "es_activo", nullable = false)
     private boolean esActivo;
-
-    @Column(name = "algoritmo_usado", length = 50, nullable = false)
-    private String algoritmoUsado;
 
     @Column(name = "fecha_creacion", nullable = false)
     private LocalDateTime fechaCreacion;

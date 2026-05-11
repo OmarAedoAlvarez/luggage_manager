@@ -16,7 +16,6 @@ public class PlanDeViaje {
     private String idEnvio;
     private int version;
     private boolean esActivo;
-    private String algoritmoUsado;
     private List<Escala> escalas;
     private LocalDateTime fechaCreacion;
 }

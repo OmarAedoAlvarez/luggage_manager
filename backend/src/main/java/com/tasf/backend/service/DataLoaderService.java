@@ -31,25 +31,19 @@ public class DataLoaderService {
 
     private final AeropuertoRepository aeropuertoRepository;
     private final VueloRepository vueloRepository;
-    private final DatabaseSeederService databaseSeederService;
 
     private List<Aeropuerto> aeropuertos = new ArrayList<>();
     private List<Vuelo> vuelos = new ArrayList<>();
 
     public DataLoaderService(
             AeropuertoRepository aeropuertoRepository,
-            VueloRepository vueloRepository,
-            DatabaseSeederService databaseSeederService) {
+            VueloRepository vueloRepository) {
         this.aeropuertoRepository = aeropuertoRepository;
         this.vueloRepository = vueloRepository;
-        this.databaseSeederService = databaseSeederService;
     }
 
     @PostConstruct
     public void init() {
-        // Fase 3: Poblar la DB si está vacía
-        databaseSeederService.seedDatabaseIfEmpty();
-        
         // Fase 4: Cargar datos estáticos desde DB a memoria (para el motor)
         loadStaticDataFromDb();
     }

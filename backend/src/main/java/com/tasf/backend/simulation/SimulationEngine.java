@@ -146,9 +146,7 @@ public class SimulationEngine {
         this.finalizada = false;
         updateWarehouseOccupation();
 
-        String algoritmoInicial = Optional.ofNullable(planning.getMetrica())
-            .map(MetricaAlgoritmo::getAlgoritmoUsado)
-            .orElse("N/A");
+        String algoritmoInicial = params.getAlgoritmo() != null ? params.getAlgoritmo() : "N/A";
         addOperationLog("Simulation initialized - Day 1 - " + this.envios.size()
             + " envios - algorithm: " + algoritmoInicial
             + " - routes evaluated: " + Optional.ofNullable(planning.getMetrica()).map(MetricaAlgoritmo::getRutasEvaluadas).orElse(0));
@@ -370,7 +368,7 @@ public class SimulationEngine {
         }
 
         long elapsed = System.currentTimeMillis() - start;
-        String algorithmUsed = Optional.ofNullable(result.getMetrica()).map(MetricaAlgoritmo::getAlgoritmoUsado).orElse("N/A");
+        String algorithmUsed = params.getAlgoritmo() != null ? params.getAlgoritmo() : "N/A";
         if (sinRuta.isEmpty()) {
             addOperationLog(String.format("[LOG] Replanificación exitosa (%s) en %d ms.", algorithmUsed, elapsed));
         } else {
@@ -465,7 +463,7 @@ public class SimulationEngine {
             .diaActual(diaActual)
             .totalDias(params.getDiasSimulacion())
             .fechaSimulada(fechaSimulada.format(TS_FORMAT))
-            .algoritmo(metricas.isEmpty() ? params.getAlgoritmo() : metricas.get(metricas.size() - 1).getAlgoritmoUsado())
+            .algoritmo(params.getAlgoritmo())
             .metrica(metricas.isEmpty() ? null : metricas.get(metricas.size() - 1))
             .enEjecucion(enEjecucion)
             .finalizada(finalizada)

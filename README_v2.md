@@ -413,7 +413,7 @@ cd luggage_manager
 
 ```bash
 cd backend
-mvn spring-boot:run
+mvn spring-boot:run -Dspring-boot.run.profiles=local
 ```
 
 The server starts on `http://localhost:8080`. Startup logs will show the number of airports, flights, and total envios loaded from classpath resources, e.g.:

@@ -53,11 +53,10 @@ public class SimulationPersistenceService {
         // 1. Persistir Itinerarios y Escalas
         for (PlanDeViaje plan : planes) {
             ItinerarioEntity itinerario = ItinerarioEntity.builder()
-                .idItinerario(plan.getIdEnvio() + "-" + plan.getAlgoritmoUsado() + "-v" + plan.getVersion())
+                .idItinerario(plan.getIdEnvio() + "-v" + plan.getVersion())
                 .idPedido(plan.getIdEnvio())
                 .version(plan.getVersion())
                 .esActivo(true) // Asumimos que el persistido al final es el activo
-                .algoritmoUsado(plan.getAlgoritmoUsado())
                 .fechaCreacion(LocalDateTime.now())
                 .build();
             
@@ -83,9 +82,8 @@ public class SimulationPersistenceService {
         // 2. Persistir Métricas
         for (MetricaAlgoritmo m : metricas) {
             MetricaEjecucionEntity entity = MetricaEjecucionEntity.builder()
-                .idMetrica("MET-" + m.getAlgoritmoUsado() + "-" + System.nanoTime())
+                .idMetrica("MET-" + System.nanoTime())
                 .idItinerario(null) // Opcional vincular
-                .algoritmoUsado(m.getAlgoritmoUsado())
                 .rutasEvaluadas(m.getRutasEvaluadas())
                 .tiempoMs(m.getTiempoEjecucionMs())
                 .exito(true)

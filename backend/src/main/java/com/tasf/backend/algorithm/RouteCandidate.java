@@ -62,11 +62,10 @@ class RouteCandidate {
         }
 
         return PlanDeViaje.builder()
-            .idPlan(envio.getIdEnvio() + "-" + algorithmName + "-v" + version)
+            .idPlan(envio.getIdEnvio() + "-v" + version)
             .idEnvio(envio.getIdEnvio())
             .version(Math.min(version, 5))
             .esActivo(true)
-            .algoritmoUsado(algorithmName)
             .escalas(escalas)
             .fechaCreacion(LocalDateTime.now())
             .build();
