@@ -164,17 +164,18 @@ public class OpsService {
             int planificada = cargaPlanificada.getOrDefault(code, 0);
             int enTransito = cargaEnTransito.getOrDefault(code, 0);
 
-            // A flight carrying not-yet-departed bags is shown as an UPCOMING departure (out of the
-            // "en vuelo" tab) with that planned load, even if its today-occurrence is airborne now.
-            // Otherwise fall back to the natural live occurrence, carrying any in-transit bags.
-            boolean inFlight;
+            // Prefer showing the live airborne occurrence if the flight is currently in the air.
+            // This prevents airplanes from disappearing from the map when future shipments are planned.
+            // Once the flight lands, it will show as upcoming with its planned load.
+            boolean inFlight = occ.inFlight();
             int cargaActual;
-            if (planificada > 0) {
-                inFlight = false;
+            
+            if (inFlight) {
+                cargaActual = enTransito;
+            } else if (planificada > 0) {
                 cargaActual = planificada;
             } else {
-                inFlight = occ.inFlight();
-                cargaActual = inFlight ? enTransito : 0;
+                cargaActual = 0;
             }
 
             // Solo enviar vuelos que están volando AHORA (inFlight) o que van a salir después (upcoming)
@@ -639,6 +640,7 @@ public class OpsService {
             .filter(v -> v.getCodigoVuelo().equals(codigoVuelo))
             .findFirst();
 
+        boolean isFlightAirborne = false;
         if (optVuelo.isPresent()) {
             Vuelo v = optVuelo.get();
             Map<String, Integer> husoByIata = new HashMap<>();
@@ -647,6 +649,7 @@ public class OpsService {
             }
             int husoOrigenVuelo = husoByIata.getOrDefault(v.getOrigen(), 0);
             FlightOccurrence occ = occurrenceOf(nowUtc, v.getHoraSalida(), v.getHoraLlegada());
+            isFlightAirborne = occ.inFlight();
             expectedDate = occ.depUtc().plusHours(husoOrigenVuelo).toLocalDate();
         }
 
@@ -662,7 +665,15 @@ public class OpsService {
                         // counts, regardless of the leg's calendar date — the displayed occurrence
                         // may differ from the leg's date for a still-airborne daily flight.
                         if (expectedDate != null && !e.isCompletada()) {
-                            envioIds.add(p.getIdEnvio());
+                            if (isFlightAirborne) {
+                                if (e.getHoraSalidaEst() != null && !e.getHoraSalidaEst().isAfter(nowUtc)) {
+                                    envioIds.add(p.getIdEnvio());
+                                }
+                            } else {
+                                if (e.getHoraSalidaEst() != null && e.getHoraSalidaEst().isAfter(nowUtc)) {
+                                    envioIds.add(p.getIdEnvio());
+                                }
+                            }
                         }
                         break;
                     }
