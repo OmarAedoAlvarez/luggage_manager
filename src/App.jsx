@@ -296,7 +296,7 @@ export default function App() {
           setBackendState(state)
           if (state.finalizada) {
             stopPolling()
-            setTimeout(() => setScreen('resultados'), 8000)
+            setScreen('resultados')
           }
         } else if (wasSimRunningRef.current && (!state || (!state.enEjecucion && !state.finalizada))) {
           // Simulation was cancelled externally (e.g., by another user pressing CANCELAR).
@@ -512,22 +512,37 @@ export default function App() {
     if (stepInProgressRef.current) return  // already fired this step
 
     stepInProgressRef.current = true
-    api.stepSimulation().then((newState) => {
-      if (!newState) return
-      stepInProgressRef.current = false
-      hydrateEnvios(newState)  // full response → cache envios for subsequent light polls
-      setBackendState(newState)
-      if (newState.finalizada) {
-        setAutoStep(false)
-        clearInterval(autoStepRef.current)
-        stopPolling()
-        setTimeout(() => setScreen('resultados'), 3000)
-      } else {
-        // Reset clock to midnight simultaneously with new day data ONLY if continuing
-        setSimClockMinutes(0)
-      }
-    }).catch((err) => {
+
+    const doStop = isLastDay
+      ? api.stopSimulation().then((newState) => {
+          if (!newState) return null
+          hydrateEnvios(newState)
+          setBackendState(newState)
+          setAutoStep(false)
+          clearInterval(autoStepRef.current)
+          stopPolling()
+          setScreen('resultados')
+          return newState
+        })
+      : api.stepSimulation().then((newState) => {
+          if (!newState) return null
+          hydrateEnvios(newState)  // full response → cache envios for subsequent light polls
+          setBackendState(newState)
+          if (newState.finalizada) {
+            setAutoStep(false)
+            clearInterval(autoStepRef.current)
+            stopPolling()
+            setScreen('resultados')
+          } else {
+            // Reset clock to midnight simultaneously with new day data ONLY if continuing
+            setSimClockMinutes(0)
+          }
+          return newState
+        })
+
+    doStop.catch((err) => {
       console.error('Auto-step error:', err)
+    }).finally(() => {
       stepInProgressRef.current = false
     })
   }, [simClockMinutes, autoStep, backendState?.diaActual, backendState?.totalDias, backendState?.totalDays])
@@ -1521,7 +1536,7 @@ export default function App() {
           <span style={{ color: 'rgba(240,75,75,0.4)' }}>|</span>
           <span>DÍA {backendState.colapsoPunto.dia}</span>
           <span style={{ color: 'rgba(240,75,75,0.4)' }}>|</span>
-          <span>SLA vencido: {backendState.colapsoPunto.pctSlaVencido}%</span>
+          <span>{backendState.colapsoPunto.tipo === 'ALMACEN' ? 'Ocupación' : 'SLA vencido'}: {backendState.colapsoPunto.pctSlaVencido}%</span>
           <span style={{ color: 'rgba(240,75,75,0.4)' }}>|</span>
           <span>Aeropuerto crítico: <strong>{backendState.colapsoPunto.aeropuertoMasCritico}</strong></span>
           <button

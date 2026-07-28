@@ -210,7 +210,7 @@ export const api = {
   }),
 
   stopSimulation: async () => withHandling('stopSimulation', async () => {
-    return request('/simulation/stop', { method: 'POST' })
+    return request('/simulation/stop', { method: 'POST' }, 60000)
   }),
 
   restartSimulation: async () => withHandling('restartSimulation', async () => {

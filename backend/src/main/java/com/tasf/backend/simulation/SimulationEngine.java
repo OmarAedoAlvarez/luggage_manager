@@ -343,6 +343,22 @@ public class SimulationEngine {
         // (colapso checks, KPIs, etc). ocupacionInicioDia is NOT changed — it stays
         // at the pre-processing value for visual continuity.
         updateWarehouseOccupation(null);
+        // Real occupancy warehouse overflow: after setting ocupacionActual from actual counts
+        // (EN_ALMACEN + PENDIENTE without maletas), check if any airport exceeds its physical
+        // capacity. This catches collapses that the projection-only path missed because
+        // finalizarOcupacionDelDia() uses plan-based peaks which can be lower than reality
+        // after avanzarDia() processes the whole day at once.
+        // NOTE: the colapso check is ONLY done at the END of day processing, NOT during the
+        // raw recount at the start of doAvanzarDia(), because at the start all maletas are
+        // EN_ALMACEN at origin before any flights depart — checking there would falsely
+        // trigger colapso on day 1.
+        for (Aeropuerto a : aeropuertos) {
+            long cap = a.getCapacidadAlmacen();
+            if (cap > 0 && a.getOcupacionActual() > cap) {
+                dispararColapsoAlmacen(a, a.getOcupacionActual());
+            }
+        }
+        if (colapsoPunto != null) return getEstado();
         checkColapsoInmediato();
 
         throughputHistorial.add(ThroughputDiaDTO.builder()
@@ -834,6 +850,9 @@ public class SimulationEngine {
             PlanDeViaje plan = latestPlan.get(e.getIdEnvio());
             if (plan == null) {
                 // PENDIENTE (no plan yet): bags sit at the origin from fechaHoraIngreso onward.
+                // Temporal filtering is handled by getEstadoInstantaneo via !w.from().isAfter(ref),
+                // so no additional date check is needed here — only count bags whose arrival time
+                // has passed relative to the live clock (nowMin).
                 windows.add(new OccWindow(e.getAeropuertoOrigen(), e.getFechaHoraIngreso(), null, displayQty));
             } else {
                 for (WarehouseOccupationCalculator.CapacityWindow w :
@@ -951,6 +970,23 @@ public class SimulationEngine {
             .filter(m -> m.getEstado() == EstadoMaleta.EN_ALMACEN && m.getUbicacionActual() != null)
             .collect(Collectors.groupingBy(Maleta::getUbicacionActual, Collectors.counting()));
 
+        // Ocupación REAL para el semáforo: maletas EN_ALMACEN + PENDIENTE sin maletas
+        // que ya ingresaron (fechaHoraIngreso <= hoy). Los PENDIENTE de días futuros
+        // se excluyen porque sus maletas aún no han llegado físicamente al almacén.
+        Map<String, Long> realCountByAirport = new HashMap<>(maletasPorAlmacen);
+        if (fechaSimulada != null) {
+            LocalDate hoy = fechaSimulada.toLocalDate();
+            Set<String> enviosConMaletas = maletas.stream()
+                .map(Maleta::getIdEnvio)
+                .collect(Collectors.toSet());
+            for (Envio envio : envios) {
+                if (envio.getEstado() != EstadoEnvio.PENDIENTE) continue;
+                if (enviosConMaletas.contains(envio.getIdEnvio())) continue;
+                if (envio.getFechaHoraIngreso().toLocalDate().isAfter(hoy)) continue;
+                realCountByAirport.merge(envio.getAeropuertoOrigen(), (long) envio.getCantidadMaletas(), Long::sum);
+            }
+        }
+
         Map<String, String> vueloADestino = vuelos.stream()
             .filter(v -> v.getDestino() != null)
             .collect(Collectors.toMap(Vuelo::getCodigoVuelo, Vuelo::getDestino, (a, b) -> a));
@@ -978,7 +1014,7 @@ public class SimulationEngine {
             .metrica(metricas.isEmpty() ? null : metricas.get(metricas.size() - 1))
             .enEjecucion(enEjecucion)
             .finalizada(finalizada)
-            .aeropuertos(aeropuertos.stream().map(a -> toAeropuertoDto(a, maletasPorAlmacen, maletasPorDestino)).toList())
+            .aeropuertos(aeropuertos.stream().map(a -> toAeropuertoDto(a, maletasPorAlmacen, maletasPorDestino, realCountByAirport)).toList())
             .vuelos(vuelos.stream().map(v -> toVueloDto(v, plansByFlight, envioById, husoByAirport)).toList())
             // Heavy list (~21k) — only built for full responses (start/step/cancel); the polled
             // light state omits it and the client refetches /envios when enviosVersion changes.
@@ -1042,11 +1078,24 @@ public class SimulationEngine {
     public synchronized List<AeropuertoDTO> getAeropuertosEstado() {
         if (params == null) {
             return dataLoaderService.getAeropuertos().stream()
-                .map(a -> toAeropuertoDto(a, Map.of(), Map.of())).toList();
+                .map(a -> toAeropuertoDto(a, Map.of(), Map.of(), Map.of())).toList();
         }
         Map<String, Long> maletasPorAlmacen = maletas.stream()
             .filter(m -> m.getEstado() == EstadoMaleta.EN_ALMACEN && m.getUbicacionActual() != null)
             .collect(Collectors.groupingBy(Maleta::getUbicacionActual, Collectors.counting()));
+        Map<String, Long> realCountByAirport = new HashMap<>(maletasPorAlmacen);
+        if (fechaSimulada != null) {
+            LocalDate hoy = fechaSimulada.toLocalDate();
+            Set<String> enviosConMaletas = maletas.stream()
+                .map(Maleta::getIdEnvio)
+                .collect(Collectors.toSet());
+            for (Envio envio : envios) {
+                if (envio.getEstado() != EstadoEnvio.PENDIENTE) continue;
+                if (enviosConMaletas.contains(envio.getIdEnvio())) continue;
+                if (envio.getFechaHoraIngreso().toLocalDate().isAfter(hoy)) continue;
+                realCountByAirport.merge(envio.getAeropuertoOrigen(), (long) envio.getCantidadMaletas(), Long::sum);
+            }
+        }
         Map<String, String> vueloADestino = vuelos.stream()
             .filter(v -> v.getDestino() != null)
             .collect(Collectors.toMap(Vuelo::getCodigoVuelo, Vuelo::getDestino, (a, b) -> a));
@@ -1057,7 +1106,7 @@ public class SimulationEngine {
                 m -> vueloADestino.getOrDefault(maletaVueloActual.get(m.getIdMaleta()), ""),
                 Collectors.counting()
             ));
-        return aeropuertos.stream().map(a -> toAeropuertoDto(a, maletasPorAlmacen, maletasPorDestino)).toList();
+        return aeropuertos.stream().map(a -> toAeropuertoDto(a, maletasPorAlmacen, maletasPorDestino, realCountByAirport)).toList();
     }
 
     public synchronized List<VueloDTO> getVuelosEstado() {
@@ -1642,6 +1691,7 @@ public class SimulationEngine {
 
         colapsoPunto = ColapsoPunto.builder()
             .dia(diaActual)
+            .tipo("SLA")
             .pctSlaVencido(Math.round(pct * 10.0) / 10.0)
             .aeropuertoMasCritico(aerMasCritico)
             .topAeropuertos(topAps)
@@ -1863,10 +1913,26 @@ public class SimulationEngine {
             Map<String, Long> counts = maletas.stream()
                 .filter(m -> m.getEstado() == EstadoMaleta.EN_ALMACEN)
                 .collect(Collectors.groupingBy(Maleta::getUbicacionActual, Collectors.counting()));
-            for (Aeropuerto a : aeropuertos) {
-                a.setOcupacionActual(counts.getOrDefault(a.getCodigoIATA(), 0L).intValue());
+            // PENDIENTE envíos without generated maletas: their physical bags sit at the
+            // origin airport warehouse from fechaHoraIngreso onward, occupying space even
+            // though no plan has been assigned yet. Count them so warehouse occupancy and
+            // the semáforo reflect the real load instead of showing 0% for airports that
+            // are full of unassigned bags.
+            Set<String> enviosConMaletas = maletas.stream()
+                .map(Maleta::getIdEnvio)
+                .collect(Collectors.toSet());
+            LocalDate hoy = fechaSimulada != null ? fechaSimulada.toLocalDate() : null;
+            for (Envio envio : envios) {
+                if (envio.getEstado() != EstadoEnvio.PENDIENTE) continue;
+                if (enviosConMaletas.contains(envio.getIdEnvio())) continue;
+                // No contar envíos que aún no han ingresado (fecha futura)
+                if (hoy != null && envio.getFechaHoraIngreso().toLocalDate().isAfter(hoy)) continue;
+                counts.merge(envio.getAeropuertoOrigen(), (long) envio.getCantidadMaletas(), Long::sum);
             }
-            return;
+        for (Aeropuerto a : aeropuertos) {
+            a.setOcupacionActual(counts.getOrDefault(a.getCodigoIATA(), 0L).intValue());
+        }
+        return;
         }
 
         // ── Projection mode (ref != null): real event-driven occupancy, continuous across days. ──
@@ -1915,19 +1981,18 @@ public class SimulationEngine {
             // counts them correctly. Without this, PENDIENTE envíos are invisible and the
             // occupation under-reports actual warehouse usage.
             if (qty == 0 || plan == null) {
-                // PENDIENTE bags are counted open-ended (arrival, no departure) ONLY at the settled
-                // point (checkColapsoAlmacen). Mid-planning, the WHOLE day's envíos are still
-                // PENDIENTE and would pile open-ended at their origins — a transient >100% that is
-                // not the real occupancy (they get routed within seconds). Counting them only when
-                // settled means a leftover PENDIENTE is a genuinely unroutable/stuck bag → real
-                // overflow that legitimately contributes to saturation/collapse.
-                if (checkColapsoAlmacen) {
-                    long pendienteQty = envio.getCantidadMaletas();
-                    if (pendienteQty > 0) {
-                        List<long[]> list = eventsByAirport.computeIfAbsent(envio.getAeropuertoOrigen(), k -> new ArrayList<>());
-                        list.add(new long[]{envio.getFechaHoraIngreso().toEpochSecond(UTC), pendienteQty});
-                        // No departure event: bags sit indefinitely until planned/departed
-                    }
+                // PENDIENTE envíos: their physical bags sit at the origin airport warehouse from
+                // fechaHoraIngreso onward. Count them as an open-ended arrival (no departure) so
+                // the event-driven projection reflects real occupancy even for unassigned bags.
+                // Mid-planning, unprocessed PENDIENTE from future windows are NOT in this batch
+                // yet (planificarSiguienteBloque only adds envios up to windowEnd), so the concern
+                // about the WHOLE day's envios piling open-ended does not apply here — the projection
+                // only sees envios already in the system that genuinely haven't been routed.
+                long pendienteQty = envio.getCantidadMaletas();
+                if (pendienteQty > 0) {
+                    List<long[]> list = eventsByAirport.computeIfAbsent(envio.getAeropuertoOrigen(), k -> new ArrayList<>());
+                    list.add(new long[]{envio.getFechaHoraIngreso().toEpochSecond(UTC), pendienteQty});
+                    // No departure event: bags sit indefinitely until planned/departed
                 }
                 continue;
             }
@@ -1991,9 +2056,12 @@ public class SimulationEngine {
             .limit(5)
             .map(Aeropuerto::getCodigoIATA)
             .collect(Collectors.toList());
+        double roundedPct = Math.round(pct * 10.0) / 10.0;
         colapsoPunto = ColapsoPunto.builder()
             .dia(diaActual)
-            .pctSlaVencido(Math.round(pct * 10.0) / 10.0)
+            .tipo("ALMACEN")
+            .pctSlaVencido(roundedPct)
+            .porcentajeOcupacion(roundedPct)
             .aeropuertoMasCritico(a.getCodigoIATA())
             .topAeropuertos(topAps)
             .build();
@@ -2155,15 +2223,21 @@ public class SimulationEngine {
 
     private AeropuertoDTO toAeropuertoDto(Aeropuerto airport,
             Map<String, Long> maletasPorAlmacen,
-            Map<String, Long> maletasPorDestino) {
+            Map<String, Long> maletasPorDestino,
+            Map<String, Long> realCountByAirport) {
         int capacidad = airport.getCapacidadAlmacen();
         int ocupacion = airport.getOcupacionActual();
+
+        // Semáforo basado en ocupación REAL (maletas EN_ALMACEN + PENDIENTE sin maletas
+        // ya ingresados), no en la proyección del plan que puede divergir porque avanzarDia()
+        // procesa el día completo de una vez, dejando el estado de las maletas adelantado.
+        long semaforoCount = realCountByAirport.getOrDefault(airport.getCodigoIATA(), (long) ocupacion);
 
         String semaforo;
         if (capacidad == 0) {
             semaforo = "verde";
         } else {
-            double pct = (ocupacion * 100.0) / capacidad;
+            double pct = (semaforoCount * 100.0) / capacidad;
             double ambarThreshold = params == null ? 85.0 : params.getUmbralSemaforoAmbar();
             double verdeThreshold = params == null ? 60.0 : params.getUmbralSemaforoVerde();
             if (pct >= ambarThreshold) {

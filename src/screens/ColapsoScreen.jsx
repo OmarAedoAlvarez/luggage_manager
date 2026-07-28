@@ -137,8 +137,16 @@ export default function ColapsoScreen({ simState, theme, onBack }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
         {[
           { label: 'Día del colapso', value: `Día ${cp.dia}`, color: 'var(--red)' },
-          { label: 'SLA vencido', value: `${cp.pctSlaVencido}%`, color: 'var(--red)' },
-          { label: 'Aeropuerto crítico', value: cp.aeropuertoMasCritico, color: 'var(--amber)' },
+          { 
+            label: cp.tipo === 'ALMACEN' ? 'Ocupación almacén' : 'SLA vencido',
+            value: cp.tipo === 'ALMACEN' ? `${cp.porcentajeOcupacion || cp.pctSlaVencido}%` : `${cp.pctSlaVencido}%`,
+            color: 'var(--red)'
+          },
+          { 
+            label: cp.tipo === 'ALMACEN' ? 'Almacén colapsado' : 'Aeropuerto crítico',
+            value: cp.aeropuertoMasCritico,
+            color: 'var(--amber)'
+          },
         ].map((kpi) => (
           <div key={kpi.label} style={panelStyle}>
             <div style={{ fontFamily: 'var(--mono)', fontSize: 24, fontWeight: 700, color: kpi.color, lineHeight: 1 }}>{kpi.value}</div>
@@ -162,7 +170,7 @@ export default function ColapsoScreen({ simState, theme, onBack }) {
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
         <div style={panelStyle}>
-          <div style={{ ...monoSm, marginBottom: 12 }}>Top aeropuertos críticos</div>
+          <div style={{ ...monoSm, marginBottom: 12 }}>{cp.tipo === 'ALMACEN' ? 'Top aeropuertos con mayor ocupación' : 'Top aeropuertos críticos'}</div>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr style={{ borderBottom: '1px solid var(--border)' }}>
