@@ -811,7 +811,26 @@ public class SimulationEngine {
             .ocupacionAlmacenes(ocupacionAlmacenes)
             .ocupacionPromedioAlmacen(ocupacionPromedio)
             .build();
-        return cached.toBuilder().kpis(merged).build();
+
+        // Publish the per-minute occupancy on each airport too. `bagsPerAirport` above is the
+        // instantaneous, physically correct count (bags whose plan window covers `ref`), but it
+        // used to feed only the aggregate KPI — the airport list was passed through frozen at the
+        // day-boundary value, so the map's semáforo never moved during the day and the morning
+        // peak was invisible. The KPI tile and the airport colours therefore disagreed on screen.
+        List<AeropuertoDTO> aeropuertosAtRef = cached.getAeropuertos() == null ? null
+            : cached.getAeropuertos().stream().map(a -> {
+                long bags = bagsPerAirport.getOrDefault(a.getCodigoIATA(), 0L);
+                return a.toBuilder()
+                    .ocupacionActual((int) bags)
+                    .semaforo(semaforoFor(bags, a.getCapacidadAlmacen(),
+                        snap.umbralVerde(), snap.umbralAmbar()))
+                    .build();
+            }).toList();
+
+        return cached.toBuilder()
+            .kpis(merged)
+            .aeropuertos(aeropuertosAtRef == null ? cached.getAeropuertos() : aeropuertosAtRef)
+            .build();
     }
 
     /** One warehouse-presence window carrying its bag quantity (immutable KPI snapshot). */
@@ -824,9 +843,22 @@ public class SimulationEngine {
     }
 
     /** Immutable projection of the current plan set, captured under lock at each cache rebuild.
-     *  getEstadoInstantaneo() evaluates occupancy at any minute against this, lock-free. */
+     *  getEstadoInstantaneo() evaluates occupancy at any minute against this, lock-free.
+     *  The semáforo thresholds travel in the snapshot so the lock-free path never reads
+     *  `params` (which avanzarDia may be mutating). */
     private record OccupancySnapshot(LocalDateTime dayStart, List<OccWindow> windows,
-            List<FlightInterval> flights, long capAlmacenTotal, Map<String, Long> capByAirport) {
+            List<FlightInterval> flights, long capAlmacenTotal, Map<String, Long> capByAirport,
+            double umbralVerde, double umbralAmbar) {
+    }
+
+    /** Warehouse semáforo from a bag count and capacity. Single source of truth so the
+     *  day-boundary state and the per-minute overlay can never disagree on the colour. */
+    private static String semaforoFor(long bags, long capacidad, double umbralVerde, double umbralAmbar) {
+        if (capacidad <= 0) return "verde";
+        double pct = bags * 100.0 / capacidad;
+        if (pct >= umbralAmbar) return "rojo";
+        if (pct >= umbralVerde) return "ambar";
+        return "verde";
     }
 
     /** Builds the immutable occupancy snapshot from the live domain state. MUST be called under
@@ -899,7 +931,9 @@ public class SimulationEngine {
         }
 
         return new OccupancySnapshot(dayStart, List.copyOf(windows), List.copyOf(flights),
-            capAlmacenTotal, Map.copyOf(capByAirport));
+            capAlmacenTotal, Map.copyOf(capByAirport),
+            params == null ? 60.0 : params.getUmbralSemaforoVerde(),
+            params == null ? 85.0 : params.getUmbralSemaforoAmbar());
     }
 
     /** Bump the envio version whenever envios/plans/estados change (drives lazy client refetch). */
@@ -970,23 +1004,6 @@ public class SimulationEngine {
             .filter(m -> m.getEstado() == EstadoMaleta.EN_ALMACEN && m.getUbicacionActual() != null)
             .collect(Collectors.groupingBy(Maleta::getUbicacionActual, Collectors.counting()));
 
-        // Ocupación REAL para el semáforo: maletas EN_ALMACEN + PENDIENTE sin maletas
-        // que ya ingresaron (fechaHoraIngreso <= hoy). Los PENDIENTE de días futuros
-        // se excluyen porque sus maletas aún no han llegado físicamente al almacén.
-        Map<String, Long> realCountByAirport = new HashMap<>(maletasPorAlmacen);
-        if (fechaSimulada != null) {
-            LocalDate hoy = fechaSimulada.toLocalDate();
-            Set<String> enviosConMaletas = maletas.stream()
-                .map(Maleta::getIdEnvio)
-                .collect(Collectors.toSet());
-            for (Envio envio : envios) {
-                if (envio.getEstado() != EstadoEnvio.PENDIENTE) continue;
-                if (enviosConMaletas.contains(envio.getIdEnvio())) continue;
-                if (envio.getFechaHoraIngreso().toLocalDate().isAfter(hoy)) continue;
-                realCountByAirport.merge(envio.getAeropuertoOrigen(), (long) envio.getCantidadMaletas(), Long::sum);
-            }
-        }
-
         Map<String, String> vueloADestino = vuelos.stream()
             .filter(v -> v.getDestino() != null)
             .collect(Collectors.toMap(Vuelo::getCodigoVuelo, Vuelo::getDestino, (a, b) -> a));
@@ -1014,7 +1031,7 @@ public class SimulationEngine {
             .metrica(metricas.isEmpty() ? null : metricas.get(metricas.size() - 1))
             .enEjecucion(enEjecucion)
             .finalizada(finalizada)
-            .aeropuertos(aeropuertos.stream().map(a -> toAeropuertoDto(a, maletasPorAlmacen, maletasPorDestino, realCountByAirport)).toList())
+            .aeropuertos(aeropuertos.stream().map(a -> toAeropuertoDto(a, maletasPorAlmacen, maletasPorDestino)).toList())
             .vuelos(vuelos.stream().map(v -> toVueloDto(v, plansByFlight, envioById, husoByAirport)).toList())
             // Heavy list (~21k) — only built for full responses (start/step/cancel); the polled
             // light state omits it and the client refetches /envios when enviosVersion changes.
@@ -1078,24 +1095,11 @@ public class SimulationEngine {
     public synchronized List<AeropuertoDTO> getAeropuertosEstado() {
         if (params == null) {
             return dataLoaderService.getAeropuertos().stream()
-                .map(a -> toAeropuertoDto(a, Map.of(), Map.of(), Map.of())).toList();
+                .map(a -> toAeropuertoDto(a, Map.of(), Map.of())).toList();
         }
         Map<String, Long> maletasPorAlmacen = maletas.stream()
             .filter(m -> m.getEstado() == EstadoMaleta.EN_ALMACEN && m.getUbicacionActual() != null)
             .collect(Collectors.groupingBy(Maleta::getUbicacionActual, Collectors.counting()));
-        Map<String, Long> realCountByAirport = new HashMap<>(maletasPorAlmacen);
-        if (fechaSimulada != null) {
-            LocalDate hoy = fechaSimulada.toLocalDate();
-            Set<String> enviosConMaletas = maletas.stream()
-                .map(Maleta::getIdEnvio)
-                .collect(Collectors.toSet());
-            for (Envio envio : envios) {
-                if (envio.getEstado() != EstadoEnvio.PENDIENTE) continue;
-                if (enviosConMaletas.contains(envio.getIdEnvio())) continue;
-                if (envio.getFechaHoraIngreso().toLocalDate().isAfter(hoy)) continue;
-                realCountByAirport.merge(envio.getAeropuertoOrigen(), (long) envio.getCantidadMaletas(), Long::sum);
-            }
-        }
         Map<String, String> vueloADestino = vuelos.stream()
             .filter(v -> v.getDestino() != null)
             .collect(Collectors.toMap(Vuelo::getCodigoVuelo, Vuelo::getDestino, (a, b) -> a));
@@ -1106,7 +1110,7 @@ public class SimulationEngine {
                 m -> vueloADestino.getOrDefault(maletaVueloActual.get(m.getIdMaleta()), ""),
                 Collectors.counting()
             ));
-        return aeropuertos.stream().map(a -> toAeropuertoDto(a, maletasPorAlmacen, maletasPorDestino, realCountByAirport)).toList();
+        return aeropuertos.stream().map(a -> toAeropuertoDto(a, maletasPorAlmacen, maletasPorDestino)).toList();
     }
 
     public synchronized List<VueloDTO> getVuelosEstado() {
@@ -2223,31 +2227,16 @@ public class SimulationEngine {
 
     private AeropuertoDTO toAeropuertoDto(Aeropuerto airport,
             Map<String, Long> maletasPorAlmacen,
-            Map<String, Long> maletasPorDestino,
-            Map<String, Long> realCountByAirport) {
+            Map<String, Long> maletasPorDestino) {
         int capacidad = airport.getCapacidadAlmacen();
         int ocupacion = airport.getOcupacionActual();
 
-        // Semáforo basado en ocupación REAL (maletas EN_ALMACEN + PENDIENTE sin maletas
-        // ya ingresados), no en la proyección del plan que puede divergir porque avanzarDia()
-        // procesa el día completo de una vez, dejando el estado de las maletas adelantado.
-        long semaforoCount = realCountByAirport.getOrDefault(airport.getCodigoIATA(), (long) ocupacion);
-
-        String semaforo;
-        if (capacidad == 0) {
-            semaforo = "verde";
-        } else {
-            double pct = (semaforoCount * 100.0) / capacidad;
-            double ambarThreshold = params == null ? 85.0 : params.getUmbralSemaforoAmbar();
-            double verdeThreshold = params == null ? 60.0 : params.getUmbralSemaforoVerde();
-            if (pct >= ambarThreshold) {
-                semaforo = "rojo";
-            } else if (pct >= verdeThreshold) {
-                semaforo = "ambar";
-            } else {
-                semaforo = "verde";
-            }
-        }
+        // Day-boundary colour, from the same projected occupancy shown in ocupacionActual.
+        // During the day getEstadoInstantaneo() overrides both with the per-minute value, which
+        // is what the map actually renders; keeping one helper for both guarantees they agree.
+        double umbralVerde = params == null ? 60.0 : params.getUmbralSemaforoVerde();
+        double umbralAmbar = params == null ? 85.0 : params.getUmbralSemaforoAmbar();
+        String semaforo = semaforoFor(ocupacion, capacidad, umbralVerde, umbralAmbar);
 
         double ocupProm = airport.getOcupacionMuestras() == 0 ? 0.0
             : airport.getOcupacionPorcentajeSuma() / airport.getOcupacionMuestras();
