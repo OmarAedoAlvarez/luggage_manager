@@ -1536,7 +1536,9 @@ export default function App() {
           <span style={{ color: 'rgba(240,75,75,0.4)' }}>|</span>
           <span>DÍA {backendState.colapsoPunto.dia}</span>
           <span style={{ color: 'rgba(240,75,75,0.4)' }}>|</span>
-          <span>{backendState.colapsoPunto.tipo === 'ALMACEN' ? 'Ocupación' : 'SLA vencido'}: {backendState.colapsoPunto.pctSlaVencido}%</span>
+          <span>{backendState.colapsoPunto.tipo === 'ALMACEN'
+            ? `Ocupación: ${backendState.colapsoPunto.pctSlaVencido}%`
+            : `Envíos con SLA vencido: ${backendState.colapsoPunto.enviosSlaVencidos ?? 0}`}</span>
           <span style={{ color: 'rgba(240,75,75,0.4)' }}>|</span>
           <span>Aeropuerto crítico: <strong>{backendState.colapsoPunto.aeropuertoMasCritico}</strong></span>
           <button

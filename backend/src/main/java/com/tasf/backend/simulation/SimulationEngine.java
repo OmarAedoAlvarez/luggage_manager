@@ -1697,6 +1697,7 @@ public class SimulationEngine {
             .dia(diaActual)
             .tipo("SLA")
             .pctSlaVencido(Math.round(pct * 10.0) / 10.0)
+            .enviosSlaVencidos((int) totalRetrasados)
             .aeropuertoMasCritico(aerMasCritico)
             .topAeropuertos(topAps)
             .build();
@@ -2066,6 +2067,8 @@ public class SimulationEngine {
             .tipo("ALMACEN")
             .pctSlaVencido(roundedPct)
             .porcentajeOcupacion(roundedPct)
+            .enviosSlaVencidos((int) envios.stream()
+                .filter(e -> e.getEstado() == EstadoEnvio.RETRASADO).count())
             .aeropuertoMasCritico(a.getCodigoIATA())
             .topAeropuertos(topAps)
             .build();

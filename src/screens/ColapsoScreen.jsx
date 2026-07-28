@@ -137,9 +137,14 @@ export default function ColapsoScreen({ simState, theme, onBack }) {
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 12, marginBottom: 24 }}>
         {[
           { label: 'Día del colapso', value: `Día ${cp.dia}`, color: 'var(--red)' },
-          { 
-            label: cp.tipo === 'ALMACEN' ? 'Ocupación almacén' : 'SLA vencido',
-            value: cp.tipo === 'ALMACEN' ? `${cp.porcentajeOcupacion || cp.pctSlaVencido}%` : `${cp.pctSlaVencido}%`,
+          {
+            // Para tipo=SLA se muestra el NÚMERO de envíos vencidos, no el porcentaje: el colapso
+            // salta con cualquier envío retrasado, así que la proporción sobre el total siempre
+            // redondea a "0.0%" (2 de 73.154) y parece un error en pantalla.
+            label: cp.tipo === 'ALMACEN' ? 'Ocupación almacén' : 'Envíos con SLA vencido',
+            value: cp.tipo === 'ALMACEN'
+              ? `${cp.porcentajeOcupacion || cp.pctSlaVencido}%`
+              : `${cp.enviosSlaVencidos ?? 0}`,
             color: 'var(--red)'
           },
           { 
