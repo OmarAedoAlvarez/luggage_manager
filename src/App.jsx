@@ -63,7 +63,7 @@ function deriveOpsEnvioEstado(envio, currentNow) {
 
 export default function App() {
   const ALGORITHM = 'SIMULATED_ANNEALING'
-  const SIM_MINUTES_PER_REAL_SECOND = 1  // 1 min/tick @ 250ms = ~6min per simulated day → 30min for 5 days
+  const SIM_MINUTES_PER_REAL_SECOND = 6  // 1 min/tick @ 250ms = ~6min per simulated day → 30min for 5 days
   // 4 ticks/sec × 1 min/tick = 4 simulated minutes per real second
   const SIM_MIN_PER_REAL_SEC = SIM_MINUTES_PER_REAL_SECOND * 4
   const [simStartedAt, setSimStartedAt] = useState(null)  // wall-clock ms when sim started
